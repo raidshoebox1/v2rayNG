@@ -93,10 +93,20 @@ for ARCH in "${ARCHS[@]}"; do
     OUTPUT_DIR="$V2RAYNG_JNI_LIBS/$ARCH"
     mkdir -p "$OUTPUT_DIR"
 
-    # cargo outputs to target/<rust-target>/release/
-    SO_FILE="$JNI_DIR/target/$RUST_TARGET/release/libeasytier_android_jni.so"
+    # cargo outputs to the workspace target directory (EasyTier/target/),
+    # not the package directory, because easytier-android-jni is a workspace member.
+    EASYTIER_ROOT="$(cd "$JNI_DIR/../.." && pwd)"
+    SO_FILE="$EASYTIER_ROOT/target/$RUST_TARGET/release/libeasytier_android_jni.so"
+    # Fallback: check the package-local target directory (standalone build)
     if [[ ! -f "$SO_FILE" ]]; then
-        echo "ERROR: Output .so not found at $SO_FILE"
+        SO_FILE="$JNI_DIR/target/$RUST_TARGET/release/libeasytier_android_jni.so"
+    fi
+    if [[ ! -f "$SO_FILE" ]]; then
+        echo "ERROR: Output .so not found at expected locations:"
+        echo "  $EASYTIER_ROOT/target/$RUST_TARGET/release/libeasytier_android_jni.so"
+        echo "  $JNI_DIR/target/$RUST_TARGET/release/libeasytier_android_jni.so"
+        echo "Searching for it..."
+        find "$EASYTIER_ROOT/target" -name "libeasytier_android_jni.so" 2>/dev/null || true
         exit 1
     fi
 
