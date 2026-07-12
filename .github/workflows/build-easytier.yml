@@ -86,16 +86,26 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        id: setup_ndk
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
         with:
-          ndk-version: ${{ env.NDK_VERSION }}
+          log-accepted-android-sdk-licenses: false
+          cmdline-tools-version: '14742923'
+          packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools'
+
+      - name: Install NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            --channel=0 \
+            --install "ndk;${{ env.NDK_VERSION }}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
       - name: Build EasyTier JNI .so
         env:
-          ANDROID_NDK_HOME: ${{ steps.setup_ndk.outputs.ndk-path }}
-          ANDROID_NDK_ROOT: ${{ steps.setup_ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ env.NDK_HOME }}
+          ANDROID_NDK_ROOT: ${{ env.NDK_HOME }}
         run: |
           cd "${{ github.workspace }}"
           chmod +x build-easytier-jni.sh
