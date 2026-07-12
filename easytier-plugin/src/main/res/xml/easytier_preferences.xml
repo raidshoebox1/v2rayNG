@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="@string/easytier_pref_category_general">
+
+        <SwitchPreferenceCompat
+            app:key="easytier_enabled"
+            app:defaultValue="false" />
+
+        <EditTextPreference
+            app:key="easytier_network_name"
+            app:defaultValue="" />
+
+        <EditTextPreference
+            app:key="easytier_network_secret"
+            app:defaultValue="" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/easytier_pref_category_network">
+
+        <EditTextPreference
+            app:key="easytier_virtual_ip"
+            app:defaultValue="" />
+
+        <EditTextPreference
+            app:key="easytier_peers"
+            app:defaultValue="" />
+
+        <EditTextPreference
+            app:key="easytier_socks5_port"
+            app:defaultValue="10852" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/easytier_pref_category_advanced">
+
+        <SwitchPreferenceCompat
+            app:key="easytier_no_tun"
+            app:defaultValue="true" />
+
+        <EditTextPreference
+            app:key="easytier_log_level"
+            app:defaultValue="warn" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

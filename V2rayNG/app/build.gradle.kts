@@ -212,6 +212,9 @@ dependencies {
     // Reorderable list
     implementation(libs.reorderable)
 
+    // EasyTier Plugin
+    implementation(project(":easytier-plugin"))
+
     // Testing Libraries
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
