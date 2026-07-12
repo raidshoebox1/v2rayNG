@@ -121,8 +121,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jni-${{ matrix.arch }}
-          path: |
-            easytier-plugin/src/main/jniLibs/${{ matrix.arch }}/libeasytier_android_jni.so
+          path: easytier-plugin/src/main/jniLibs/
+          if-no-files-found: error
           retention-days: 30
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -167,10 +167,20 @@ jobs:
         run: |
           echo "=== JNI .so files ==="
           find easytier-plugin/src/main/jniLibs -name "*.so" -exec ls -lh {} \;
+          echo "=== Directory structure ==="
+          find easytier-plugin/src/main/jniLibs -type d | sort
           if [ -z "$(find easytier-plugin/src/main/jniLibs -name '*.so')" ]; then
             echo "ERROR: No .so files found!"
             exit 1
           fi
+          # Verify each .so is inside an ABI directory
+          for so in $(find easytier-plugin/src/main/jniLibs -name '*.so'); do
+            parent=$(basename "$(dirname "$so")")
+            case "$parent" in
+              arm64-v8a|armeabi-v7a|x86|x86_64) echo "OK: $so (ABI: $parent)" ;;
+              *) echo "ERROR: $so is not in an ABI directory (parent: $parent)"; exit 1 ;;
+            esac
+          done
 
       - name: Restore cached libhevtun
         id: cache-libhevtun-restore
