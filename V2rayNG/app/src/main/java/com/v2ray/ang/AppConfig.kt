@@ -76,6 +76,15 @@ object AppConfig {
     const val PREF_MODE = "pref_mode"
     const val PREF_ROOT_MODE_ENABLE = "pref_root_mode_enabled"
     const val PREF_ROOT_LAN_SHARING = "pref_root_lan_sharing"
+
+    /** EasyTier plugin settings */
+    const val PREF_EASYTIER_ENABLED = "easytier_enabled"
+    const val PREF_EASYTIER_NETWORK_NAME = "easytier_network_name"
+    const val PREF_EASYTIER_NETWORK_SECRET = "easytier_network_secret"
+    const val PREF_EASYTIER_VIRTUAL_IP = "easytier_virtual_ip"
+    const val PREF_EASYTIER_PEERS = "easytier_peers"
+    const val PREF_EASYTIER_SOCKS5_PORT = "easytier_socks5_port"
+    const val PREF_EASYTIER_NO_TUN = "easytier_no_tun"
     const val PREF_IS_BOOTED = "pref_is_booted"
     const val PREF_CHECK_UPDATE_PRE_RELEASE = "pref_check_update_pre_release"
     const val PREF_GEO_FILES_SOURCES = "pref_geo_files_sources"

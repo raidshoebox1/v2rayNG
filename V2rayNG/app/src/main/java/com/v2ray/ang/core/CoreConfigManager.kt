@@ -2,6 +2,7 @@ package com.v2ray.ang.core
 
 import android.content.Context
 import android.text.TextUtils
+import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.dto.ConfigResult
@@ -20,6 +21,8 @@ import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.PackageUidResolver
 import com.v2ray.ang.util.Utils
+import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierSettingsManager
 
 object CoreConfigManager {
     private var initConfigCache: String? = null
@@ -124,7 +127,11 @@ object CoreConfigManager {
             }
         }
 
-        return JsonUtil.toJsonPretty(json)?.let { ConfigResult(true, configContext.guid, it) } ?: result
+        return JsonUtil.toJsonPretty(json)?.let { 
+            // Inject EasyTier outbound for custom configs too
+            val withEasyTier = injectEasyTierIntoCustomConfig(configContext.context, it)
+            ConfigResult(true, configContext.guid, withEasyTier)
+        } ?: result
     }
 
     /**
@@ -193,6 +200,9 @@ object CoreConfigManager {
         applyObservability(v2rayConfig, balancerStrategies)
         applySpeedDisabled(v2rayConfig)
         resolveOutboundDomainsToHosts(v2rayConfig)
+
+        // Inject EasyTier outbound + routing rules if the plugin is enabled
+        injectEasyTier(configContext.context, v2rayConfig)
 
         return v2rayConfig
     }
@@ -1244,6 +1254,134 @@ object CoreConfigManager {
         val observatory: V2rayConfig.ObservatoryObject? = null,
         val burstObservatory: V2rayConfig.BurstObservatoryObject? = null,
     )
+
+    //endregion
+    //region EasyTier Plugin Integration
+
+    /**
+     * Inject EasyTier SOCKS5 outbound and routing rules into the Xray config.
+     *
+     * When the EasyTier plugin is enabled, a SOCKS5 outbound pointing to the
+     * local EasyTier listener is appended, and routing rules for LAN/mesh
+     * CIDRs are prepended to direct internal traffic through EasyTier.
+     */
+    private fun injectEasyTier(context: Context, v2rayConfig: V2rayConfig) {
+        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return
+        if (!etConfig.enabled) return
+
+        // Avoid duplicate outbounds
+        if (v2rayConfig.outbounds.any { it.tag == EasyTierPlugin.OUTBOUND_TAG }) {
+            LogUtil.d(AppConfig.TAG, "EasyTier outbound already present, skipping injection")
+            return
+        }
+
+        // Build SOCKS5 outbound for EasyTier
+        val socks5Outbound = V2rayConfig.OutboundBean(
+            tag = EasyTierPlugin.OUTBOUND_TAG,
+            protocol = "socks",
+            settings = V2rayConfig.OutboundBean.OutSettingsBean(
+                address = "127.0.0.1",
+                port = etConfig.socks5Port
+            )
+        )
+        v2rayConfig.outbounds.add(socks5Outbound)
+        LogUtil.i(AppConfig.TAG, "EasyTier: injected SOCKS5 outbound on 127.0.0.1:${etConfig.socks5Port}")
+
+        // Build routing rules: LAN CIDRs → EasyTier
+        val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
+
+        // Also include any mesh CIDRs discovered by EasyTier.
+        // getMeshCidrs() calls the static JNI directly (does not require a running plugin instance),
+        // but only returns meaningful results when an EasyTier instance is actually running.
+        try {
+            val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
+            if (meshCidrs.isNotEmpty()) {
+                lanCidrs.addAll(meshCidrs.filter { it !in lanCidrs })
+                LogUtil.d(AppConfig.TAG, "EasyTier: discovered mesh CIDRs: $meshCidrs")
+            }
+        } catch (e: Throwable) {
+            LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs (non-fatal)", e)
+        }
+
+        val easyTierRule = V2rayConfig.RoutingBean.RulesBean(
+            type = "field",
+            ip = lanCidrs,
+            outboundTag = EasyTierPlugin.OUTBOUND_TAG
+        )
+        // Prepend so it takes priority over the catch-all proxy rule
+        v2rayConfig.routing.rules.add(0, easyTierRule)
+        LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule for CIDRs: $lanCidrs")
+    }
+
+    /**
+     * Inject EasyTier outbound + routing rules into a custom (raw JSON) config.
+     *
+     * For custom configs the content is a JSON string, so we parse it,
+     * inject the outbound and routing rule, then re-serialize.
+     *
+     * @return Modified JSON string, or the original if EasyTier is disabled or injection fails.
+     */
+    private fun injectEasyTierIntoCustomConfig(context: Context, json: String): String {
+        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return json
+        if (!etConfig.enabled) return json
+
+        return try {
+            val obj = JsonUtil.parseString(json)?.takeIf { it.isJsonObject }?.asJsonObject ?: return json
+
+            // Check if EasyTier outbound already exists
+            val outbounds = obj.get("outbounds")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?: JsonArray().also { obj.add("outbounds", it) }
+
+            if (outbounds.any { e ->
+                e.isJsonObject && e.asJsonObject.get("tag")?.asString == EasyTierPlugin.OUTBOUND_TAG
+            }) {
+                return json // already injected
+            }
+
+            // Build SOCKS5 outbound JSON
+            val socks5Outbound = com.google.gson.JsonObject().apply {
+                addProperty("tag", EasyTierPlugin.OUTBOUND_TAG)
+                addProperty("protocol", "socks")
+                add("settings", com.google.gson.JsonObject().apply {
+                    add("servers", com.google.gson.JsonArray().apply {
+                        add(com.google.gson.JsonObject().apply {
+                            addProperty("address", "127.0.0.1")
+                            addProperty("port", etConfig.socks5Port)
+                        })
+                    })
+                })
+            }
+            outbounds.add(socks5Outbound)
+
+            // Build routing rule for LAN CIDRs
+            val routing = obj.get("routing")?.takeIf { it.isJsonObject }?.asJsonObject
+                ?: com.google.gson.JsonObject().also { obj.add("routing", it) }
+            val rules = routing.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?: JsonArray().also { routing.add("rules", it) }
+
+            val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
+            // Also include any mesh CIDRs discovered by EasyTier.
+            try {
+                val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
+                if (meshCidrs.isNotEmpty()) {
+                    lanCidrs.addAll(meshCidrs.filter { it !in lanCidrs })
+                }
+            } catch (e: Throwable) {
+                LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs for custom config (non-fatal)", e)
+            }
+            val easyTierRule = com.google.gson.JsonObject().apply {
+                addProperty("type", "field")
+                add("ip", Gson().toJsonTree(lanCidrs))
+                addProperty("outboundTag", EasyTierPlugin.OUTBOUND_TAG)
+            }
+            rules.add(0, easyTierRule)
+
+            JsonUtil.toJsonPretty(obj) ?: json
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "EasyTier: failed to inject into custom config", e)
+            json
+        }
+    }
 
     //endregion
 }
