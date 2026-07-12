@@ -184,6 +184,9 @@ dependencies {
     // Reorderable list
     implementation(libs.reorderable)
 
+    // EasyTier Plugin
+    implementation(project(":easytier-plugin"))
+
     // Testing Libraries
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
