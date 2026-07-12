@@ -2,6 +2,8 @@ package com.v2ray.ang.root
 
 import android.content.Context
 import android.os.Process
+import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierSettingsManager
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
@@ -166,11 +168,11 @@ object RootProxyManager {
             appendLine("ip rule add fwmark $MARK table $TABLE priority $PRIORITY")
             // mark the device's own packets into the tun (Root mode only)
             if (captureDeviceTraffic) {
-                append(buildMangleMarking("iptables", appUid, perAppEnabled, bypassApps, selectedUids))
+                append(buildMangleMarking(context, "iptables", appUid, perAppEnabled, bypassApps, selectedUids))
             }
             // optionally route hotspot / USB-tethered clients through the tun too
             if (lanShare) {
-                append(buildLanShareSetup(captureDeviceTraffic, ipv6))
+                append(buildLanShareSetup(context, captureDeviceTraffic, ipv6))
             }
             if (captureDeviceTraffic) {
                 // IPv6 is best-effort: never fail the (working) IPv4 setup over it.
@@ -180,7 +182,7 @@ object RootProxyManager {
                     appendLine("ip -6 addr add ${AppConfig.ROOT_TUN_ADDR_V6} dev $TUN 2>/dev/null || true")
                     appendLine("ip -6 route replace default dev $TUN table $TABLE 2>/dev/null || true")
                     appendLine("ip -6 rule add fwmark $MARK table $TABLE priority $PRIORITY 2>/dev/null || true")
-                    append(buildMangleMarking("ip6tables", appUid, perAppEnabled, bypassApps, selectedUids))
+                    append(buildMangleMarking(context, "ip6tables", appUid, perAppEnabled, bypassApps, selectedUids))
                 } else {
                     // v6 disabled: blackhole native v6 egress for the captured apps so they
                     // fall back to v4-through-proxy, matching what a v4-only VpnService does.
@@ -227,6 +229,7 @@ object RootProxyManager {
      * - proxy mode: only the selected apps are captured.
      */
     private fun buildMangleMarking(
+        context: Context,
         cmd: String,
         appUid: Int,
         perAppEnabled: Boolean,
@@ -259,6 +262,24 @@ object RootProxyManager {
             // keep LAN / private destinations direct (per-family CIDR list)
             val cidrs = if (cmd == "ip6tables") bypassCidrsV6 else bypassCidrs
             cidrs.forEach { appendLine("$cmd -t mangle -A $CHAIN -d $it -j RETURN") }
+            // EasyTier mesh CIDRs must NOT be bypassed: re-mark them so they route into
+            // the tun even though they fall inside the private ranges above. This is
+            // only needed for IPv4 (EasyTier mesh uses v4 by default).
+            if (cmd == "iptables") {
+                try {
+                    val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
+                    if (etConfig != null && etConfig.enabled) {
+                        val meshCidrs = EasyTierPlugin.DEFAULT_LAN_CIDRS +
+                            EasyTierPlugin.getMeshCidrsStatic().filter { it !in EasyTierPlugin.DEFAULT_LAN_CIDRS }
+                        meshCidrs.forEach { cidr ->
+                            appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
+                        }
+                        LogUtil.d(AppConfig.TAG, "EasyTier: re-marked ${meshCidrs.size} mesh CIDRs in root mangle chain")
+                    }
+                } catch (e: Throwable) {
+                    LogUtil.w(AppConfig.TAG, "EasyTier: failed to re-mark mesh CIDRs in root mode", e)
+                }
+            }
             if (allowMode) {
                 // Proxy ONLY the explicitly selected apps. If nothing resolved (e.g. the
                 // selected packages failed to resolve to uids at early boot), mark nothing
@@ -331,7 +352,7 @@ object RootProxyManager {
      * Mirrors Magic_V2Ray's hotspot rules (FORWARD accept, DNS DNAT, source-based policy
      * routing for private client ranges, MSS clamp).
      */
-    private fun buildLanShareSetup(captureDeviceTraffic: Boolean, ipv6: Boolean): String {
+    private fun buildLanShareSetup(context: Context, captureDeviceTraffic: Boolean, ipv6: Boolean): String {
         val fwd = AppConfig.ROOT_FWD_CHAIN
         val dnsChain = AppConfig.ROOT_DNS_CHAIN
         val v6fwd = AppConfig.ROOT_V6_FWD_CHAIN
@@ -369,6 +390,21 @@ object RootProxyManager {
             appendLine("ip rule add iif lo goto 6000 pref 5000 2>/dev/null || true")
             appendLine("ip rule add iif $TUN lookup main suppress_prefixlength 0 pref 5010 2>/dev/null || true")
             appendLine("ip rule add iif $TUN goto 6000 pref 5020 2>/dev/null || true")
+            // EasyTier mesh CIDRs must go through the tun (not direct via main table).
+            // Add higher-priority rules for mesh CIDRs BEFORE the LAN-direct rules below.
+            try {
+                val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
+                if (etConfig != null && etConfig.enabled) {
+                    val meshCidrs = EasyTierPlugin.DEFAULT_LAN_CIDRS +
+                        EasyTierPlugin.getMeshCidrsStatic().filter { it !in EasyTierPlugin.DEFAULT_LAN_CIDRS }
+                    meshCidrs.forEachIndexed { index, cidr ->
+                        appendLine("ip rule add to $cidr lookup $TABLE pref $((5024 - index)) 2>/dev/null || true")
+                    }
+                    LogUtil.d(AppConfig.TAG, "EasyTier: added ${meshCidrs.size} mesh CIDR ip-rules in LAN sharing setup")
+                }
+            } catch (e: Throwable) {
+                LogUtil.w(AppConfig.TAG, "EasyTier: failed to add mesh CIDR ip-rules for LAN sharing", e)
+            }
             appendLine("ip rule add to 10.0.0.0/8 lookup main pref 5025 2>/dev/null || true")
             appendLine("ip rule add to 172.16.0.0/12 lookup main pref 5026 2>/dev/null || true")
             appendLine("ip rule add to 192.168.0.0/16 lookup main pref 5027 2>/dev/null || true")

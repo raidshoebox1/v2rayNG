@@ -1,5 +1,6 @@
 package com.v2ray.ang.ui.settings
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,8 @@ import com.v2ray.ang.handler.SettingsChangeManager
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.util.Utils
+import com.easytier.plugin.ui.EasyTierSettingsActivity
+import androidx.compose.ui.platform.LocalContext
 
 class SettingsActivity : BaseComponentActivity() {
 
@@ -65,6 +68,7 @@ fun SettingsScreen(
 ) {
     val scrollState = rememberScrollState()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     var localDns by rememberMmkvBool(AppConfig.PREF_LOCAL_DNS_ENABLED, false)
     var fakeDns by rememberMmkvBool(AppConfig.PREF_FAKE_DNS_ENABLED, false)
@@ -598,6 +602,14 @@ fun SettingsScreen(
                     } else {
                         lanSharing = newValue
                     }
+                }
+            )
+
+            PreferenceGroupHeader(title = stringResource(R.string.easytier_settings_title))
+            SettingsMenuItem(
+                title = stringResource(R.string.easytier_settings_title),
+                onClick = {
+                    context.startActivity(Intent(context, EasyTierSettingsActivity::class.java))
                 }
             )
 

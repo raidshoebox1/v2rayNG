@@ -32,6 +32,8 @@ import com.v2ray.ang.service.IDialerService
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.MessageUtil
 import com.v2ray.ang.util.Utils
+import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierSettingsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -48,6 +50,7 @@ object CoreServiceManager {
     private var currentConfig: ProfileItem? = null
     private var processFinder: XrayProcessFinder? = null
     private var browserDialer: IDialerService? = null
+    private var easyTierPlugin: EasyTierPlugin? = null
 
     var serviceControl: SoftReference<ServiceControl>? = null
         set(value) {
@@ -266,6 +269,10 @@ object CoreServiceManager {
 
         NotificationManager.showNotification(currentConfig)
         CoreNativeManager.reconcileBrowserDialer(dialerAddr)
+
+        // Start EasyTier plugin before Xray-core so the SOCKS5 endpoint is ready
+        startEasyTier(service)
+
         coreController.startLoop(result.content, tunFd)
 
         if (!coreController.isRunning) {
@@ -297,6 +304,9 @@ object CoreServiceManager {
     fun stopCoreLoop(): Boolean {
         val service = getService() ?: return false
 
+        // Stop EasyTier plugin after Xray-core stops
+        stopEasyTier()
+
         if (coreController.isRunning) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -325,6 +335,53 @@ object CoreServiceManager {
 
         return true
     }
+
+    //region EasyTier Plugin
+
+    /**
+     * Start the EasyTier mesh-network plugin if enabled in settings.
+     *
+     * EasyTier runs in no-tun + SOCKS5 mode so it does NOT compete for
+     * the Android VpnService slot. Xray-core routes internal/mesh CIDRs
+     * to the EasyTier SOCKS5 endpoint via an injected outbound.
+     */
+    private fun startEasyTier(context: Context) {
+        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
+        if (etConfig == null || !etConfig.enabled) {
+            LogUtil.d(AppConfig.TAG, "EasyTier: plugin disabled, skipping start")
+            return
+        }
+        try {
+            val plugin = EasyTierPlugin(context)
+            val started = plugin.start(etConfig)
+            if (started) {
+                easyTierPlugin = plugin
+                LogUtil.i(AppConfig.TAG, "EasyTier: plugin started successfully (network=${etConfig.networkName}, socks5=${etConfig.socks5Port})")
+            } else {
+                LogUtil.e(AppConfig.TAG, "EasyTier: plugin failed to start")
+            }
+        } catch (e: Throwable) {
+            // Catch Throwable — UnsatisfiedLinkError is an Error, not an Exception
+            LogUtil.e(AppConfig.TAG, "EasyTier: plugin start exception", e)
+        }
+    }
+
+    /**
+     * Stop the EasyTier mesh-network plugin.
+     */
+    private fun stopEasyTier() {
+        easyTierPlugin?.let { plugin ->
+            try {
+                plugin.stop()
+                LogUtil.i(AppConfig.TAG, "EasyTier: plugin stopped")
+            } catch (e: Throwable) {
+                LogUtil.e(AppConfig.TAG, "EasyTier: plugin stop exception", e)
+            }
+        }
+        easyTierPlugin = null
+    }
+
+    //endregion
 
     /**
      * Queries and resets all outbound traffic counters in one core call.

@@ -28,6 +28,8 @@ import com.v2ray.ang.root.RootLanSharing
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.MyContextWrapper
 import com.v2ray.ang.util.Utils
+import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierSettingsManager
 import java.lang.ref.SoftReference
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -242,6 +244,34 @@ class CoreVpnService : VpnService(), ServiceControl {
             AppConfig.ROUTED_IP_LIST.forEach {
                 val addr = it.split('/')
                 builder.addRoute(addr[0], addr[1].toInt())
+            }
+            // When bypass-lan is enabled, private IP ranges (10.x, 172.16-31.x, 192.168.x)
+            // are excluded from VPN routing so they go direct. However, EasyTier mesh
+            // traffic uses these same private ranges and MUST go through the VPN tunnel
+            // to reach Xray-core's EasyTier SOCKS5 outbound. Add mesh CIDRs explicitly.
+            try {
+                val etConfig = EasyTierSettingsManager.getEasyTierConfig(this)
+                if (etConfig != null && etConfig.enabled) {
+                    // Always add the default LAN CIDRs so Xray-core can route them to EasyTier
+                    EasyTierPlugin.DEFAULT_LAN_CIDRS.forEach { cidr ->
+                        val parts = cidr.split('/')
+                        if (parts.size == 2) {
+                            builder.addRoute(parts[0], parts[1].toInt())
+                            LogUtil.d(AppConfig.TAG, "EasyTier: added VPN route for mesh CIDR: $cidr")
+                        }
+                    }
+                    // Also add any dynamically discovered mesh CIDRs
+                    val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
+                    meshCidrs.forEach { cidr ->
+                        val parts = cidr.split('/')
+                        if (parts.size == 2 && EasyTierPlugin.DEFAULT_LAN_CIDRS.none { it == cidr }) {
+                            builder.addRoute(parts[0], parts[1].toInt())
+                            LogUtil.d(AppConfig.TAG, "EasyTier: added VPN route for discovered mesh CIDR: $cidr")
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                LogUtil.w(AppConfig.TAG, "EasyTier: failed to add mesh CIDR VPN routes", e)
             }
         } else {
             builder.addRoute("0.0.0.0", 0)
