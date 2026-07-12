@@ -1,0 +1,286 @@
+name: Build v2rayNG + EasyTier Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag (e.g. v1.0.0-easytier). Leave empty to skip release and only upload artifacts.'
+        required: false
+        type: string
+        default: ''
+      build_jni_only:
+        description: 'Build JNI .so libraries only (skip APK)'
+        required: false
+        type: boolean
+        default: false
+      build_apk_only:
+        description: 'Build APK only (skip JNI, use cached .so)'
+        required: false
+        type: boolean
+        default: false
+      abi_filters:
+        description: 'ABI filters (semicolon-separated, e.g. arm64-v8a;armeabi-v7a)'
+        required: false
+        type: string
+        default: ''
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'V2rayNG/**'
+      - 'easytier-plugin/**'
+      - 'EasyTier/**'
+      - 'build-easytier-jni.sh'
+      - '.github/workflows/build-easytier.yml'
+  pull_request:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: write
+
+env:
+  # Rust toolchain version matching EasyTier's rust-toolchain.toml
+  RUST_VERSION: "1.95"
+  # Android NDK version (matches v2rayNG's build.yml)
+  NDK_VERSION: "29.0.14206865"
+  # ABI mapping: Android ABI -> Rust target triple
+  # All four ABIs are built by default; override via abi_filters input
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1: Build EasyTier JNI native libraries (.so)
+  # ─────────────────────────────────────────────────────────────────────────
+  build-jni:
+    name: Build JNI .so (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.build_apk_only }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64-v8a
+            target: aarch64-linux-android
+          - arch: armeabi-v7a
+            target: armv7-linux-androideabi
+          - arch: x86_64
+            target: x86_64-linux-android
+          - arch: x86
+            target: i686-linux-android
+
+    steps:
+      - name: Checkout v2rayNG + EasyTier plugin repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup_ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+
+      - name: Build EasyTier JNI .so
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup_ndk.outputs.ndk-path }}
+          ANDROID_NDK_ROOT: ${{ steps.setup_ndk.outputs.ndk-path }}
+        run: |
+          cd "${{ github.workspace }}"
+          chmod +x build-easytier-jni.sh
+          ./build-easytier-jni.sh ${{ matrix.arch }}
+
+      - name: Upload JNI .so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jni-${{ matrix.arch }}
+          path: |
+            easytier-plugin/src/main/jniLibs/${{ matrix.arch }}/libeasytier_android_jni.so
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2: Build APK
+  # ─────────────────────────────────────────────────────────────────────────
+  build-apk:
+    name: Build APK
+    runs-on: ubuntu-latest
+    needs: build-jni
+    if: ${{ !inputs.build_jni_only }}
+    steps:
+      - name: Checkout v2rayNG + EasyTier plugin repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          log-accepted-android-sdk-licenses: false
+          cmdline-tools-version: '14742923'
+          packages: 'platforms;android-37.0 build-tools;37.0.0 platform-tools'
+
+      - name: Install NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            --channel=0 \
+            --install "ndk;${{ env.NDK_VERSION }}"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+          # Inject ndkVersion into app/build.gradle.kts (same as upstream build.yml)
+          sed -i '10i\        ndkVersion = "${{ env.NDK_VERSION }}"' ${{ github.workspace }}/V2rayNG/app/build.gradle.kts
+
+      - name: Download JNI .so artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jni-*
+          path: easytier-plugin/src/main/jniLibs
+          merge-multiple: true
+
+      - name: Verify JNI .so files
+        run: |
+          echo "=== JNI .so files ==="
+          find easytier-plugin/src/main/jniLibs -name "*.so" -exec ls -lh {} \;
+          if [ -z "$(find easytier-plugin/src/main/jniLibs -name '*.so')" ]; then
+            echo "ERROR: No .so files found!"
+            exit 1
+          fi
+
+      - name: Restore cached libhevtun
+        id: cache-libhevtun-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/libs
+          key: libhevtun-${{ runner.os }}-${{ env.NDK_HOME }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+      - name: Build libhevtun
+        if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
+        run: |
+          bash compile-hevtun.sh
+
+      - name: Save libhevtun
+        if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/libs
+          key: libhevtun-${{ runner.os }}-${{ env.NDK_HOME }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+      - name: Copy libhevtun
+        run: |
+          cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+      - name: Fetch AndroidLibXrayLite tag
+        run: |
+          pushd AndroidLibXrayLite
+          CURRENT_TAG=$(git describe --tags --abbrev=0)
+          echo "Current tag in this repo: $CURRENT_TAG"
+          echo "CURRENT_TAG=$CURRENT_TAG" >> $GITHUB_ENV
+          popd
+
+      - name: Download libv2ray
+        uses: robinraju/release-downloader@v1.13
+        with:
+          repository: '2dust/AndroidLibXrayLite'
+          tag: ${{ env.CURRENT_TAG }}
+          fileName: 'libv2ray.aar'
+          out-file-path: V2rayNG/app/libs/
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build APK (debug)
+        run: |
+          cd ${{ github.workspace }}/V2rayNG
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          chmod 755 gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
+        with:
+          name: apk-arm64-v8a
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*debug/*arm64-v8a*.apk
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
+        with:
+          name: apk-armeabi-v7a
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*debug/*armeabi-v7a*.apk
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
+        with:
+          name: apk-x86_64
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*debug/*x86_64*.apk
+
+      - name: Upload x86 APK
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
+        with:
+          name: apk-x86
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*debug/*x86*.apk
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
+        with:
+          name: apk-universal
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*debug/*universal*.apk
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 3: Create Draft Release (only when release_tag is provided)
+  # ─────────────────────────────────────────────────────────────────────────
+  create-draft-release:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    needs: build-apk
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apk-*
+          path: release
+          merge-multiple: true
+
+      - name: List downloaded APKs
+        run: find release -name '*.apk' -exec ls -lh {} \;
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_tag }}
+          body: |
+            # v2rayNG + EasyTier Plugin ${{ inputs.release_tag }}
+
+            ## Artifacts
+            - Debug APK builds for arm64-v8a, armeabi-v7a, x86, x86_64, and universal
+            - Built from commit ${{ github.sha }}
+
+            ## EasyTier submodule
+            Pinned to EasyTier/EasyTier (see submodule reference in repo)
+
+            > This is a draft release. Review and publish when ready.
+          draft: true
+          prerelease: false
+          files: release/*.apk
