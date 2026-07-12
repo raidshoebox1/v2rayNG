@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="easytier_settings_title">EasyTier Mesh VPN</string>
+    <string name="easytier_pref_category_general">General</string>
+    <string name="easytier_pref_category_network">Network</string>
+    <string name="easytier_pref_category_advanced">Advanced</string>
+    <string name="easytier_pref_enable_title">Enable EasyTier</string>
+    <string name="easytier_pref_enable_summary">Run EasyTier mesh network alongside v2rayNG</string>
+    <string name="easytier_pref_network_name_title">Network Name</string>
+    <string name="easytier_pref_network_name_summary">Must match across all peers in the same mesh</string>
+    <string name="easytier_pref_network_secret_title">Network Secret</string>
+    <string name="easytier_pref_network_secret_summary">Shared secret for mesh encryption (leave empty for no encryption)</string>
+    <string name="easytier_pref_virtual_ip_title">Virtual IP (optional)</string>
+    <string name="easytier_pref_virtual_ip_summary">e.g. 10.144.144.1 — leave empty for auto-assignment</string>
+    <string name="easytier_pref_peers_title">Peer Addresses</string>
+    <string name="easytier_pref_peers_summary">Comma-separated peer URIs, e.g. tcp://peer.example.com:11010</string>
+    <string name="easytier_pref_socks5_port_title">SOCKS5 Port</string>
+    <string name="easytier_pref_socks5_port_summary">Local SOCKS5 port for EasyTier listener</string>
+    <string name="easytier_pref_socks5_port_summary_value">SOCKS5 listener on port %1$d</string>
+    <string name="easytier_pref_no_tun_title">No TUN Mode</string>
+    <string name="easytier_pref_no_tun_summary">Required: disables TUN to avoid conflict with v2rayNG VPN</string>
+    <string name="easytier_pref_log_level_title">Log Level</string>
+    <string name="easytier_pref_log_level_summary">error, warn, info, debug, or trace</string>
+</resources>

@@ -22,3 +22,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "v2rayNG"
 include(":app")
+include(":easytier-plugin")
+project(":easytier-plugin").projectDir = file("../easytier-plugin")
