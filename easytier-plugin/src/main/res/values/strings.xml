@@ -40,4 +40,25 @@
     <!-- Log Level -->
     <string name="easytier_pref_log_level_title">Log Level</string>
     <string name="easytier_pref_log_level_summary">error, warn, info, debug, or trace</string>
+
+    <!-- Diagnostics -->
+    <string name="easytier_pref_category_diagnostics">Diagnostics</string>
+    <string name="easytier_pref_status_title">Status</string>
+    <string name="easytier_pref_view_logs_title">View Logs</string>
+    <string name="easytier_pref_view_logs_summary">Show recent EasyTier log entries</string>
+    <string name="easytier_pref_clear_logs_title">Clear Logs</string>
+    <string name="easytier_pref_clear_logs_summary">Clear the in-memory log buffer</string>
+    <string name="easytier_pref_network_info_title">Network Info</string>
+    <string name="easytier_pref_network_info_summary">Show raw EasyTier network info JSON</string>
+
+    <!-- Status values -->
+    <string name="easytier_status_stopped">Stopped</string>
+    <string name="easytier_status_starting">Starting…</string>
+    <string name="easytier_status_running">Running</string>
+    <string name="easytier_status_error">Error</string>
+
+    <!-- Log dialog -->
+    <string name="easytier_logs_empty">No log entries yet. Start v2rayNG VPN to begin.</string>
+    <string name="easytier_clear_logs">Clear Logs</string>
+    <string name="easytier_network_info_empty">No network info available. Make sure EasyTier is enabled and v2rayNG VPN is connected.</string>
 </resources>
