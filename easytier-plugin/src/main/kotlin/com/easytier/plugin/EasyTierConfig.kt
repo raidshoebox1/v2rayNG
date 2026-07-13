@@ -61,16 +61,9 @@ data class EasyTierConfig(
             sb.appendLine("""network_secret = "$networkSecret"""")
         }
 
-        // flags section — no_tun is critical for v2rayNG coexistence
-        sb.appendLine()
-        sb.appendLine("[flags]")
-        sb.appendLine("no_tun = ${noTun}")
-        if (mtu != null) {
-            sb.appendLine("mtu = $mtu")
-        }
-
-        // SOCKS5 proxy listener — EasyTier uses socks5_proxy field, NOT listeners
+        // SOCKS5 proxy listener — top-level field, NOT inside [flags]
         // Rust Config field: socks5_proxy: Option<url::Url>
+        // Must be placed before any [section] to be parsed as top-level.
         sb.appendLine()
         sb.appendLine("""socks5_proxy = "socks5://0.0.0.0:$socks5Port"""")
 
@@ -81,6 +74,12 @@ data class EasyTierConfig(
             sb.appendLine("listeners = [${listeners.joinToString(", ") { "\"$it\"" }}]")
         }
 
+        // virtual IP (optional, top-level field)
+        if (!virtualIp.isNullOrBlank()) {
+            sb.appendLine()
+            sb.appendLine("""ipv4 = "$virtualIp"""")
+        }
+
         // peers — must use [[peer]] array-of-tables syntax
         // Rust Config field: peer: Option<Vec<PeerConfig>> where PeerConfig { uri: url::Url }
         for (peer in peers) {
@@ -89,15 +88,14 @@ data class EasyTierConfig(
             sb.appendLine("""uri = "$peer"""")
         }
 
-        // virtual IP (optional)
-        if (!virtualIp.isNullOrBlank()) {
-            sb.appendLine()
-            sb.appendLine("""ipv4 = "$virtualIp"""")
+        // flags section — no_tun is critical for v2rayNG coexistence
+        // Must come AFTER all top-level fields to avoid swallowing them.
+        sb.appendLine()
+        sb.appendLine("[flags]")
+        sb.appendLine("no_tun = ${noTun}")
+        if (mtu != null) {
+            sb.appendLine("mtu = $mtu")
         }
-
-        // Note: [console_logger] and [file_logger] are not fields of the Rust Config struct.
-        // Logging is controlled by android_logger in the JNI layer (fixed at Debug level).
-        // They would be silently ignored if included, so we omit them.
 
         return sb.toString().trimEnd()
     }
