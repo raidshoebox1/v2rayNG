@@ -50,8 +50,27 @@ data class EasyTierConfig(
     fun toToml(): String {
         val sb = StringBuilder()
 
-        // instance_name (top-level, matches Rust Config.instance_name)
+        // ─── TOP-LEVEL FIELDS (must come before any [section] in TOML) ───
+
+        // instance_name (top-level)
         sb.appendLine("""instance_name = "$instanceName"""")
+
+        // SOCKS5 proxy listener — top-level field
+        // Rust Config field: socks5_proxy: Option<url::Url>
+        sb.appendLine("""socks5_proxy = "socks5://0.0.0.0:$socks5Port"""")
+
+        // listeners (optional, for peer discovery — NOT for SOCKS5)
+        // EasyTier listener schemes: tcp://, udp://, wg://, ws://, wss://
+        if (listeners.isNotEmpty()) {
+            sb.appendLine("listeners = [${listeners.joinToString(", ") { "\"$it\"" }}]")
+        }
+
+        // virtual IP (optional, top-level field)
+        if (!virtualIp.isNullOrBlank()) {
+            sb.appendLine("""ipv4 = "$virtualIp"""")
+        }
+
+        // ─── SECTIONS (must come after all top-level fields) ───
 
         // network_identity section
         sb.appendLine()
@@ -59,25 +78,6 @@ data class EasyTierConfig(
         sb.appendLine("""network_name = "$networkName"""")
         if (networkSecret.isNotEmpty()) {
             sb.appendLine("""network_secret = "$networkSecret"""")
-        }
-
-        // SOCKS5 proxy listener — top-level field, NOT inside [flags]
-        // Rust Config field: socks5_proxy: Option<url::Url>
-        // Must be placed before any [section] to be parsed as top-level.
-        sb.appendLine()
-        sb.appendLine("""socks5_proxy = "socks5://0.0.0.0:$socks5Port"""")
-
-        // listeners (optional, for peer discovery — NOT for SOCKS5)
-        // EasyTier listener schemes: tcp://, udp://, wg://, ws://, wss://
-        if (listeners.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("listeners = [${listeners.joinToString(", ") { "\"$it\"" }}]")
-        }
-
-        // virtual IP (optional, top-level field)
-        if (!virtualIp.isNullOrBlank()) {
-            sb.appendLine()
-            sb.appendLine("""ipv4 = "$virtualIp"""")
         }
 
         // peers — must use [[peer]] array-of-tables syntax
@@ -89,10 +89,10 @@ data class EasyTierConfig(
         }
 
         // flags section — no_tun is critical for v2rayNG coexistence
-        // Must come AFTER all top-level fields to avoid swallowing them.
+        // Must come last so it doesn't swallow top-level fields.
         sb.appendLine()
         sb.appendLine("[flags]")
-        sb.appendLine("no_tun = ${noTun}")
+        sb.appendLine("no_tun = $noTun")
         if (mtu != null) {
             sb.appendLine("mtu = $mtu")
         }
