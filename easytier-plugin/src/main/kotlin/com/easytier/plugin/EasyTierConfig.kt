@@ -22,6 +22,7 @@ package com.easytier.plugin
 data class EasyTierConfig(
     var enabled: Boolean = false,
     var instanceName: String = EasyTierPlugin.DEFAULT_INSTANCE_NAME,
+    var hostname: String? = null,
     var networkName: String = "",
     var networkSecret: String = "",
     var virtualIp: String? = null,
@@ -54,6 +55,15 @@ data class EasyTierConfig(
 
         // instance_name (top-level)
         sb.appendLine("""instance_name = "$instanceName"""")
+
+        // hostname (top-level, optional) — node name shown in mesh peer list.
+        // Rust Config field: hostname: Option<String>
+        // If empty/omitted, EasyTier falls back to the OS hostname (usually "localhost" on Android).
+        // Max 32 chars; control chars stripped by EasyTier's get_hostname().
+        if (!hostname.isNullOrBlank()) {
+            val safe = hostname!!.replace("\"", "\\\"")
+            sb.appendLine("""hostname = "$safe"""")
+        }
 
         // SOCKS5 proxy listener — top-level field
         // Rust Config field: socks5_proxy: Option<url::Url>
@@ -106,6 +116,7 @@ data class EasyTierConfig(
          *
          * Expected keys (all optional except `network_name`):
          * - `easytier_enabled` (Boolean)
+         * - `easytier_hostname` (String, optional)
          * - `easytier_network_name` (String)
          * - `easytier_network_secret` (String)
          * - `easytier_virtual_ip` (String)
@@ -117,6 +128,7 @@ data class EasyTierConfig(
         fun fromMap(map: Map<String, Any?>): EasyTierConfig {
             return EasyTierConfig(
                 enabled = map["easytier_enabled"] as? Boolean ?: false,
+                hostname = (map["easytier_hostname"] as? String)?.takeIf { it.isNotBlank() },
                 networkName = map["easytier_network_name"] as? String ?: "",
                 networkSecret = map["easytier_network_secret"] as? String ?: "",
                 virtualIp = (map["easytier_virtual_ip"] as? String)?.takeIf { it.isNotBlank() },

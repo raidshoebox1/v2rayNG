@@ -1,50 +1,94 @@
 package com.easytier.plugin.ui
 
+import android.content.Context
+import android.content.res.Configuration
 import android.os.Bundle
-import android.text.InputType
+import android.os.LocaleList
 import android.text.method.ScrollingMovementMethod
+import android.view.View
+import android.widget.ArrayAdapter
+import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.preference.EditTextPreference
-import androidx.preference.Preference
-import androidx.preference.PreferenceFragmentCompat
-import androidx.preference.SwitchPreferenceCompat
+import androidx.appcompat.widget.SwitchCompat
+import androidx.appcompat.widget.Toolbar
 import com.easytier.plugin.EasyTierPlugin
 import com.easytier.plugin.EasyTierSettingsManager
 import com.easytier.plugin.R
+import java.util.Locale
 
 /**
- * EasyTier plugin settings activity.
+ * EasyTier plugin settings activity — form-based UI matching v2rayNG's
+ * server-edit style.
  *
- * Provides UI for configuring the EasyTier mesh network:
- * - Enable/disable toggle
- * - Network name and secret
- * - Virtual IP (optional)
- * - Peer addresses
- * - SOCKS5 port
- * - No-TUN mode (always on for v2rayNG coexistence)
- * - Log level
- * - Runtime status and log viewer
+ * Fields are auto-saved to SharedPreferences on focus loss (EditText) or
+ * selection change (Switch/Spinner).  Diagnostic buttons at the bottom
+ * allow starting/stopping EasyTier and viewing logs/network info.
  *
- * Accessed from v2rayNG settings via intent:
- *   Intent(context, EasyTierSettingsActivity::class.java)
+ * Locale is provided by the launching app via [localeOverride] so the
+ * plugin (which cannot access v2rayNG's SettingsManager) still respects
+ * the user's language choice.
  */
 class EasyTierSettingsActivity : AppCompatActivity() {
+
+    companion object {
+        /**
+         * Set by the app before launching this activity so that
+         * [attachBaseContext] can wrap the locale.
+         * Format: BCP-47 language tag, e.g. "zh-CN", "vi", "ru".
+         */
+        @Volatile
+        var localeOverride: String? = null
+    }
+
+    private lateinit var swEnable: SwitchCompat
+    private lateinit var etNetworkName: EditText
+    private lateinit var etNetworkSecret: EditText
+    private lateinit var etHostname: EditText
+    private lateinit var etVirtualIp: EditText
+    private lateinit var etPeers: EditText
+    private lateinit var etSocks5Port: EditText
+    private lateinit var swNoTun: SwitchCompat
+    private lateinit var spLogLevel: Spinner
+    private lateinit var tvStatus: TextView
+
+    private val logLevels = arrayOf("error", "warn", "info", "debug", "trace")
+    private var isLoading = false
+
+    override fun attachBaseContext(newBase: Context) {
+        val tag = localeOverride
+        if (!tag.isNullOrBlank()) {
+            val locale = Locale.forLanguageTag(tag)
+            val config = Configuration(newBase.resources.configuration)
+            config.setLocale(locale)
+            config.setLocales(LocaleList(locale))
+            super.attachBaseContext(newBase.createConfigurationContext(config))
+        } else {
+            super.attachBaseContext(newBase)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.easytier_settings_activity)
 
-        if (savedInstanceState == null) {
-            supportFragmentManager
-                .beginTransaction()
-                .replace(R.id.easytier_settings_container, EasyTierSettingsFragment())
-                .commit()
-        }
-
+        val toolbar = findViewById<Toolbar>(R.id.easytier_toolbar)
+        setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.setTitle(R.string.easytier_settings_title)
+
+        bindViews()
+        loadValues()
+        setupAutoSave()
+        setupDiagnostics()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshStatus()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -52,223 +96,227 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         return true
     }
 
-    class EasyTierSettingsFragment : PreferenceFragmentCompat() {
+    // ── View binding ──
 
-        override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-            // PreferenceFragmentCompat uses default SharedPreferences by default.
-            // v2rayNG's MMKV data store is only set on the main SettingsFragment,
-            // so our EasyTier fragment stays isolated with standard SharedPreferences.
-            setPreferencesFromResource(R.xml.easytier_preferences, rootKey)
+    private fun bindViews() {
+        swEnable = findViewById(R.id.sw_enable)
+        etNetworkName = findViewById(R.id.et_network_name)
+        etNetworkSecret = findViewById(R.id.et_network_secret)
+        etHostname = findViewById(R.id.et_hostname)
+        etVirtualIp = findViewById(R.id.et_virtual_ip)
+        etPeers = findViewById(R.id.et_peers)
+        etSocks5Port = findViewById(R.id.et_socks5_port)
+        swNoTun = findViewById(R.id.sw_no_tun)
+        spLogLevel = findViewById(R.id.sp_log_level)
+        tvStatus = findViewById(R.id.tv_status)
+    }
 
-            // Wire up summary providers
-            findPreference<SwitchPreferenceCompat>(EasyTierSettingsManager.KEY_ENABLED)?.apply {
-                title = getString(R.string.easytier_pref_enable_title)
-                summary = getString(R.string.easytier_pref_enable_summary)
+    // ── Load saved values into form fields ──
+
+    private fun loadValues() {
+        isLoading = true
+        val ctx = applicationContext
+        swEnable.isChecked = EasyTierSettingsManager.isEnabled(ctx)
+        etNetworkName.setText(EasyTierSettingsManager.getNetworkName(ctx))
+        etNetworkSecret.setText(EasyTierSettingsManager.getNetworkSecret(ctx))
+        etHostname.setText(EasyTierSettingsManager.getHostname(ctx) ?: "")
+        etVirtualIp.setText(EasyTierSettingsManager.getVirtualIp(ctx) ?: "")
+        etPeers.setText(EasyTierSettingsManager.getPeers(ctx).joinToString("\n"))
+        etSocks5Port.setText(EasyTierSettingsManager.getSocks5Port(ctx).toString())
+        swNoTun.isChecked = true // always on for v2rayNG coexistence
+
+        val currentLevel = EasyTierSettingsManager.getLogLevel(ctx)
+        spLogLevel.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, logLevels).also {
+            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        val levelIndex = logLevels.indexOf(currentLevel)
+        spLogLevel.setSelection(if (levelIndex >= 0) levelIndex else 1) // default "warn"
+
+        isLoading = false
+    }
+
+    // ── Auto-save ──
+
+    private fun setupAutoSave() {
+        swEnable.setOnCheckedChangeListener { _, isChecked ->
+            if (!isLoading) EasyTierSettingsManager.setEnabled(applicationContext, isChecked)
+        }
+
+        val focusListener = View.OnFocusChangeListener { v, hasFocus ->
+            if (!hasFocus && !isLoading) saveField(v.id)
+        }
+        etNetworkName.onFocusChangeListener = focusListener
+        etNetworkSecret.onFocusChangeListener = focusListener
+        etHostname.onFocusChangeListener = focusListener
+        etVirtualIp.onFocusChangeListener = focusListener
+        etPeers.onFocusChangeListener = focusListener
+        etSocks5Port.onFocusChangeListener = focusListener
+
+        spLogLevel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!isLoading) EasyTierSettingsManager.setLogLevel(applicationContext, logLevels[position])
             }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
 
-            findPreference<EditTextPreference>(EasyTierSettingsManager.KEY_NETWORK_NAME)?.apply {
-                title = getString(R.string.easytier_pref_network_name_title)
-                summary = getString(R.string.easytier_pref_network_name_summary)
-                setOnBindEditTextListener { it.inputType = InputType.TYPE_CLASS_TEXT }
+    private fun saveField(viewId: Int) {
+        val ctx = applicationContext
+        when (viewId) {
+            R.id.et_network_name -> EasyTierSettingsManager.setNetworkName(ctx, etNetworkName.text.toString().trim())
+            R.id.et_network_secret -> EasyTierSettingsManager.setNetworkSecret(ctx, etNetworkSecret.text.toString())
+            R.id.et_hostname -> EasyTierSettingsManager.setHostname(ctx, etHostname.text.toString().trim().ifEmpty { null })
+            R.id.et_virtual_ip -> EasyTierSettingsManager.setVirtualIp(ctx, etVirtualIp.text.toString().trim().ifEmpty { null })
+            R.id.et_peers -> {
+                val peers = etPeers.text.toString()
+                    .split("\n", ",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                EasyTierSettingsManager.setPeers(ctx, peers)
             }
-
-            findPreference<EditTextPreference>(EasyTierSettingsManager.KEY_NETWORK_SECRET)?.apply {
-                title = getString(R.string.easytier_pref_network_secret_title)
-                summary = getString(R.string.easytier_pref_network_secret_summary)
-                setOnBindEditTextListener {
-                    it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            R.id.et_socks5_port -> {
+                val port = etSocks5Port.text.toString().toIntOrNull()
+                if (port != null && port in 1..65535) {
+                    EasyTierSettingsManager.setSocks5Port(ctx, port)
                 }
             }
+        }
+    }
 
-            findPreference<EditTextPreference>(EasyTierSettingsManager.KEY_VIRTUAL_IP)?.apply {
-                title = getString(R.string.easytier_pref_virtual_ip_title)
-                summary = getString(R.string.easytier_pref_virtual_ip_summary)
-                setOnBindEditTextListener { it.inputType = InputType.TYPE_CLASS_TEXT }
+    /** Save all editable fields at once (used before starting EasyTier). */
+    private fun saveAllFields() {
+        saveField(R.id.et_network_name)
+        saveField(R.id.et_network_secret)
+        saveField(R.id.et_hostname)
+        saveField(R.id.et_virtual_ip)
+        saveField(R.id.et_peers)
+        saveField(R.id.et_socks5_port)
+    }
+
+    // ── Diagnostics ──
+
+    private fun setupDiagnostics() {
+        findViewById<View>(R.id.btn_start).setOnClickListener { startEasyTier() }
+        findViewById<View>(R.id.btn_stop).setOnClickListener { stopEasyTier() }
+        findViewById<View>(R.id.btn_view_logs).setOnClickListener { showLogDialog() }
+        findViewById<View>(R.id.btn_clear_logs).setOnClickListener {
+            EasyTierPlugin.clearLogs()
+            Toast.makeText(this, R.string.easytier_logs_cleared, Toast.LENGTH_SHORT).show()
+        }
+        findViewById<View>(R.id.btn_network_info).setOnClickListener { showNetworkInfoDialog() }
+    }
+
+    private fun refreshStatus() {
+        val status = EasyTierPlugin.getStatus()
+        val error = EasyTierPlugin.getLastError()
+        tvStatus.text = when (status) {
+            "running" -> getString(R.string.easytier_status_running)
+            "starting" -> getString(R.string.easytier_status_starting)
+            "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
+            else -> getString(R.string.easytier_status_stopped)
+        }
+    }
+
+    private fun startEasyTier() {
+        saveAllFields()
+        val ctx = applicationContext
+        val config = EasyTierSettingsManager.getEasyTierConfig(ctx)
+        if (config == null) {
+            EasyTierPlugin.log("E", "EasyTier: cannot start — plugin disabled or network name empty")
+            Toast.makeText(this, R.string.easytier_start_failed_disabled, Toast.LENGTH_LONG).show()
+            return
+        }
+        EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, hostname=${config.hostname}, peers=${config.peers}, socks5=${config.socks5Port})")
+        val started = EasyTierPlugin.startTest(ctx, config)
+        if (started) {
+            Toast.makeText(this, R.string.easytier_started, Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, R.string.easytier_start_failed, Toast.LENGTH_LONG).show()
+        }
+        refreshStatus()
+    }
+
+    private fun stopEasyTier() {
+        EasyTierPlugin.stopTest()
+        try {
+            com.easytier.jni.EasyTierJNI.stopAllInstances()
+            EasyTierPlugin.log("I", "EasyTier: stopped all instances via stop button")
+        } catch (e: Throwable) {
+            EasyTierPlugin.log("E", "EasyTier: stop button failed", e)
+        }
+        refreshStatus()
+    }
+
+    private fun showLogDialog() {
+        val logs = EasyTierPlugin.getLogs()
+        val sb = StringBuilder()
+        if (logs.isEmpty()) {
+            sb.append(getString(R.string.easytier_logs_empty))
+        } else {
+            val sdf = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
+            for (entry in logs) {
+                sb.append("[")
+                sb.append(sdf.format(java.util.Date(entry.timestamp)))
+                sb.append("] ")
+                sb.append(entry.level)
+                sb.append(": ")
+                sb.append(entry.message)
+                sb.append("\n")
             }
+        }
 
-            findPreference<EditTextPreference>(EasyTierSettingsManager.KEY_PEERS)?.apply {
-                title = getString(R.string.easytier_pref_peers_title)
-                summary = getString(R.string.easytier_pref_peers_summary)
-                setOnBindEditTextListener { it.inputType = InputType.TYPE_CLASS_TEXT }
-            }
+        val textView = TextView(this).apply {
+            text = sb.toString()
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(48, 32, 48, 32)
+            movementMethod = ScrollingMovementMethod.getInstance()
+            isVerticalScrollBarEnabled = true
+            setHorizontallyScrolling(true)
+        }
 
-            findPreference<EditTextPreference>(EasyTierSettingsManager.KEY_SOCKS5_PORT)?.apply {
-                title = getString(R.string.easytier_pref_socks5_port_title)
-                summary = getString(R.string.easytier_pref_socks5_port_summary)
-                setOnBindEditTextListener { it.inputType = InputType.TYPE_CLASS_NUMBER }
-                summaryProvider = Preference.SummaryProvider<EditTextPreference> { pref ->
-                    val port = pref.text?.toIntOrNull() ?: EasyTierPlugin.DEFAULT_SOCKS5_PORT
-                    getString(R.string.easytier_pref_socks5_port_summary_value, port)
-                }
-            }
-
-            findPreference<SwitchPreferenceCompat>(EasyTierSettingsManager.KEY_NO_TUN)?.apply {
-                title = getString(R.string.easytier_pref_no_tun_title)
-                summary = getString(R.string.easytier_pref_no_tun_summary)
-                // Always true for v2rayNG coexistence; disable toggle
-                isChecked = true
-                isEnabled = false
-            }
-
-            findPreference<EditTextPreference>(EasyTierSettingsManager.KEY_LOG_LEVEL)?.apply {
-                title = getString(R.string.easytier_pref_log_level_title)
-                summary = getString(R.string.easytier_pref_log_level_summary)
-            }
-
-            // Status preference — shows current EasyTier status
-            findPreference<Preference>("easytier_status")?.apply {
-                title = getString(R.string.easytier_pref_status_title)
-                isSelectable = false
-                summary = formatStatus()
-            }
-
-            // Start EasyTier now (for testing without VPN)
-            findPreference<Preference>("easytier_start_now")?.setOnPreferenceClickListener {
-                startEasyTierFromSettings()
-                true
-            }
-
-            // Stop EasyTier
-            findPreference<Preference>("easytier_stop_now")?.setOnPreferenceClickListener {
-                EasyTierPlugin.stopTest()
-                // Also stop any VPN-started instance via JNI
-                try {
-                    com.easytier.jni.EasyTierJNI.stopAllInstances()
-                    EasyTierPlugin.log("I", "EasyTier: stopped all instances via stop button")
-                } catch (e: Throwable) {
-                    EasyTierPlugin.log("E", "EasyTier: stop button failed", e)
-                }
-                findPreference<Preference>("easytier_status")?.summary = formatStatus()
-                true
-            }
-
-            // View logs preference — shows a dialog with recent EasyTier logs
-            findPreference<Preference>("easytier_view_logs")?.setOnPreferenceClickListener {
-                showLogDialog()
-                true
-            }
-
-            // Clear logs preference
-            findPreference<Preference>("easytier_clear_logs")?.setOnPreferenceClickListener {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.easytier_pref_view_logs_title)
+            .setView(textView)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(R.string.easytier_clear_logs) { _, _ ->
                 EasyTierPlugin.clearLogs()
-                true
             }
+            .show()
+    }
 
-            // Network info preference — shows raw network info from EasyTier
-            findPreference<Preference>("easytier_network_info")?.setOnPreferenceClickListener {
-                showNetworkInfoDialog()
-                true
+    private fun showNetworkInfoDialog() {
+        val info = try {
+            EasyTierPlugin.getNetworkInfoJsonStatic()
+        } catch (e: Throwable) {
+            "Error: ${e.javaClass.simpleName}: ${e.message}"
+        }
+        val displayText = if (info.isNullOrBlank()) {
+            getString(R.string.easytier_network_info_empty)
+        } else {
+            try {
+                val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+                val parsed = com.google.gson.JsonParser.parseString(info)
+                gson.toJson(parsed)
+            } catch (e: Exception) {
+                info
             }
         }
 
-        override fun onResume() {
-            super.onResume()
-            // Refresh status summary when returning to the page
-            findPreference<Preference>("easytier_status")?.summary = formatStatus()
+        val textView = TextView(this).apply {
+            text = displayText
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(48, 32, 48, 32)
+            movementMethod = ScrollingMovementMethod.getInstance()
+            isVerticalScrollBarEnabled = true
+            setHorizontallyScrolling(true)
         }
 
-        private fun formatStatus(): String {
-            val status = EasyTierPlugin.getStatus()
-            val error = EasyTierPlugin.getLastError()
-            return when (status) {
-                "running" -> getString(R.string.easytier_status_running)
-                "starting" -> getString(R.string.easytier_status_starting)
-                "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
-                else -> getString(R.string.easytier_status_stopped)
-            }
-        }
-
-        private fun startEasyTierFromSettings() {
-            val ctx = requireContext()
-            val config = EasyTierSettingsManager.getEasyTierConfig(ctx)
-            if (config == null) {
-                EasyTierPlugin.log("E", "EasyTier: cannot start — plugin disabled or network name empty")
-                android.widget.Toast.makeText(ctx, "Enable EasyTier and set Network Name first", android.widget.Toast.LENGTH_LONG).show()
-                return
-            }
-            EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, peers=${config.peers}, socks5=${config.socks5Port})")
-            val started = EasyTierPlugin.startTest(ctx, config)
-            if (started) {
-                android.widget.Toast.makeText(ctx, "EasyTier started — check Status & Logs", android.widget.Toast.LENGTH_SHORT).show()
-            } else {
-                android.widget.Toast.makeText(ctx, "EasyTier failed to start — check Logs", android.widget.Toast.LENGTH_LONG).show()
-            }
-            // Refresh status
-            findPreference<Preference>("easytier_status")?.summary = formatStatus()
-        }
-
-        private fun showLogDialog() {
-            val logs = EasyTierPlugin.getLogs()
-            val sb = StringBuilder()
-            if (logs.isEmpty()) {
-                sb.append(getString(R.string.easytier_logs_empty))
-            } else {
-                val sdf = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
-                for (entry in logs) {
-                    sb.append("[")
-                    sb.append(sdf.format(java.util.Date(entry.timestamp)))
-                    sb.append("] ")
-                    sb.append(entry.level)
-                    sb.append(": ")
-                    sb.append(entry.message)
-                    sb.append("\n")
-                }
-            }
-
-            val textView = TextView(requireContext()).apply {
-                text = sb.toString()
-                textSize = 11f
-                typeface = android.graphics.Typeface.MONOSPACE
-                setPadding(48, 32, 48, 32)
-                movementMethod = ScrollingMovementMethod.getInstance()
-                isVerticalScrollBarEnabled = true
-                setHorizontallyScrolling(true)
-            }
-
-            AlertDialog.Builder(requireContext())
-                .setTitle(R.string.easytier_pref_view_logs_title)
-                .setView(textView)
-                .setPositiveButton(android.R.string.ok, null)
-                .setNegativeButton(R.string.easytier_clear_logs) { _, _ ->
-                    EasyTierPlugin.clearLogs()
-                }
-                .show()
-        }
-
-        private fun showNetworkInfoDialog() {
-            val info = try {
-                EasyTierPlugin.getNetworkInfoJsonStatic()
-            } catch (e: Throwable) {
-                "Error: ${e.javaClass.simpleName}: ${e.message}"
-            }
-            val displayText = if (info.isNullOrBlank()) {
-                getString(R.string.easytier_network_info_empty)
-            } else {
-                // Pretty-print JSON if possible
-                try {
-                    val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
-                    val parsed = com.google.gson.JsonParser.parseString(info)
-                    gson.toJson(parsed)
-                } catch (e: Exception) {
-                    info
-                }
-            }
-
-            val textView = TextView(requireContext()).apply {
-                text = displayText
-                textSize = 11f
-                typeface = android.graphics.Typeface.MONOSPACE
-                setPadding(48, 32, 48, 32)
-                movementMethod = ScrollingMovementMethod.getInstance()
-                isVerticalScrollBarEnabled = true
-                setHorizontallyScrolling(true)
-            }
-
-            AlertDialog.Builder(requireContext())
-                .setTitle(R.string.easytier_pref_network_info_title)
-                .setView(textView)
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.easytier_pref_network_info_title)
+            .setView(textView)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 }
