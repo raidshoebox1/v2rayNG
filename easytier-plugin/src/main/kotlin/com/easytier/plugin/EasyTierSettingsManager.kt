@@ -21,6 +21,7 @@ object EasyTierSettingsManager {
 
     // Keys
     const val KEY_ENABLED = PREFIX + "enabled"
+    const val KEY_HOSTNAME = PREFIX + "hostname"
     const val KEY_NETWORK_NAME = PREFIX + "network_name"
     const val KEY_NETWORK_SECRET = PREFIX + "network_secret"
     const val KEY_VIRTUAL_IP = PREFIX + "virtual_ip"
@@ -43,6 +44,9 @@ object EasyTierSettingsManager {
 
     fun isEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_ENABLED, false)
+
+    fun getHostname(context: Context): String? =
+        prefs(context).getString(KEY_HOSTNAME, null)?.takeIf { it.isNotBlank() }
 
     fun getNetworkName(context: Context): String =
         prefs(context).getString(KEY_NETWORK_NAME, "") ?: ""
@@ -79,6 +83,10 @@ object EasyTierSettingsManager {
 
     fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+    }
+
+    fun setHostname(context: Context, hostname: String?) {
+        prefs(context).edit().putString(KEY_HOSTNAME, hostname).apply()
     }
 
     fun setNetworkName(context: Context, name: String) {
@@ -129,6 +137,7 @@ object EasyTierSettingsManager {
         return EasyTierConfig(
             enabled = true,
             instanceName = EasyTierPlugin.DEFAULT_INSTANCE_NAME,
+            hostname = getHostname(context),
             networkName = networkName,
             networkSecret = getNetworkSecret(context),
             virtualIp = getVirtualIp(context),
