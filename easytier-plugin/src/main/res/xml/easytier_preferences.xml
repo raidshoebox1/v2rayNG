@@ -51,8 +51,7 @@
         <Preference
             app:key="easytier_status"
             app:title="@string/easytier_pref_status_title"
-            app:summary="@string/easytier_status_stopped"
-            app:selectable="false" />
+            app:summary="@string/easytier_status_stopped" />
 
         <Preference
             app:key="easytier_view_logs"
