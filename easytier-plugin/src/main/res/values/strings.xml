@@ -6,14 +6,10 @@
     <!-- Preference Categories -->
     <string name="easytier_pref_category_general">General</string>
     <string name="easytier_pref_category_network">Network</string>
-    <string name="easytier_pref_category_advanced">Advanced</string>
     <string name="easytier_pref_category_diagnostics">Diagnostics</string>
 
     <!-- Enable -->
-    <string name="easytier_pref_enable_title">Enable EasyTier</string>
-    <string name="easytier_pref_enable_summary">Run EasyTier mesh network alongside v2rayNG</string>
-
-    <!-- Network Name -->
+    <string name="easytier_pref_enable_title">Run EasyTier mesh network alongside v2rayNG</string>
     <string name="easytier_pref_network_name_title">Network Name</string>
     <string name="easytier_pref_network_name_hint">Must match across all peers</string>
 
@@ -37,11 +33,9 @@
     <string name="easytier_pref_socks5_port_title">SOCKS5 Port</string>
     <string name="easytier_pref_socks5_port_hint">Local port for EasyTier SOCKS5 listener</string>
 
-    <!-- No TUN -->
-    <string name="easytier_pref_no_tun_title">No TUN Mode</string>
-    <string name="easytier_pref_no_tun_summary">Required: disables TUN to avoid conflict with v2rayNG VPN</string>
-
-    <!-- Log Level -->
+    <!-- Log -->
+    <string name="easytier_pref_log_enabled_title">Enable Logging</string>
+    <string name="easytier_pref_log_enabled_summary">Capture EasyTier logs for in-app display</string>
     <string name="easytier_pref_log_level_title">Log Level</string>
 
     <!-- Status -->
