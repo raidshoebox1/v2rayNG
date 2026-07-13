@@ -153,8 +153,18 @@ class EasyTierSettingsActivity : AppCompatActivity() {
 
         override fun onResume() {
             super.onResume()
-            // Refresh status summary when returning to the page
-            findPreference<Preference>("easytier_status")?.notifyChanged()
+            // Refresh status summary when returning to the page.
+            // notifyChanged() is protected, so set the summary directly.
+            findPreference<Preference>("easytier_status")?.let { pref ->
+                val status = EasyTierPlugin.getStatus()
+                val error = EasyTierPlugin.getLastError()
+                pref.summary = when (status) {
+                    "running" -> getString(R.string.easytier_status_running)
+                    "starting" -> getString(R.string.easytier_status_starting)
+                    "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
+                    else -> getString(R.string.easytier_status_stopped)
+                }
+            }
         }
 
         private fun showLogDialog() {
