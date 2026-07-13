@@ -540,4 +540,9 @@
     <string name="connection_test_empty_message">无详细信息</string>
     <string name="value_unknown">未知</string>
 
+    <!-- EasyTier Plugin -->
+    <string name="easytier_category_title">EasyTier 组网</string>
+    <string name="easytier_settings_entry_title">EasyTier 设置</string>
+    <string name="easytier_settings_entry_summary">配置组网（SOCKS5 模式）</string>
+
 </resources>
