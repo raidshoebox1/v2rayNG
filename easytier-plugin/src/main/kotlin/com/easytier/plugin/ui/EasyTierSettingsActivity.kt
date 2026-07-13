@@ -2,6 +2,10 @@ package com.easytier.plugin.ui
 
 import android.os.Bundle
 import android.text.InputType
+import android.text.method.ScrollingMovementMethod
+import android.view.LayoutInflater
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.EditTextPreference
 import androidx.preference.Preference
@@ -22,6 +26,7 @@ import com.easytier.plugin.R
  * - SOCKS5 port
  * - No-TUN mode (always on for v2rayNG coexistence)
  * - Log level
+ * - Runtime status and log viewer
  *
  * Accessed from v2rayNG settings via intent:
  *   Intent(context, EasyTierSettingsActivity::class.java)
@@ -110,6 +115,121 @@ class EasyTierSettingsActivity : AppCompatActivity() {
                 title = getString(R.string.easytier_pref_log_level_title)
                 summary = getString(R.string.easytier_pref_log_level_summary)
             }
+
+            // Status preference — shows current EasyTier status
+            findPreference<Preference>("easytier_status")?.apply {
+                title = getString(R.string.easytier_pref_status_title)
+                summaryProvider = Preference.SummaryProvider<Preference> {
+                    val status = EasyTierPlugin.getStatus()
+                    val error = EasyTierPlugin.getLastError()
+                    val statusText = when (status) {
+                        "running" -> getString(R.string.easytier_status_running)
+                        "starting" -> getString(R.string.easytier_status_starting)
+                        "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
+                        else -> getString(R.string.easytier_status_stopped)
+                    }
+                    statusText
+                }
+            }
+
+            // View logs preference — shows a dialog with recent EasyTier logs
+            findPreference<Preference>("easytier_view_logs")?.setOnPreferenceClickListener {
+                showLogDialog()
+                true
+            }
+
+            // Clear logs preference
+            findPreference<Preference>("easytier_clear_logs")?.setOnPreferenceClickListener {
+                EasyTierPlugin.clearLogs()
+                true
+            }
+
+            // Network info preference — shows raw network info from EasyTier
+            findPreference<Preference>("easytier_network_info")?.setOnPreferenceClickListener {
+                showNetworkInfoDialog()
+                true
+            }
+        }
+
+        override fun onResume() {
+            super.onResume()
+            // Refresh status summary when returning to the page
+            findPreference<Preference>("easytier_status")?.notifyChanged()
+        }
+
+        private fun showLogDialog() {
+            val logs = EasyTierPlugin.getLogs()
+            val sb = StringBuilder()
+            if (logs.isEmpty()) {
+                sb.append(getString(R.string.easytier_logs_empty))
+            } else {
+                val sdf = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault())
+                for (entry in logs) {
+                    sb.append("[")
+                    sb.append(sdf.format(java.util.Date(entry.timestamp)))
+                    sb.append("] ")
+                    sb.append(entry.level)
+                    sb.append(": ")
+                    sb.append(entry.message)
+                    sb.append("\n")
+                }
+            }
+
+            val inflater = LayoutInflater.from(requireContext())
+            val textView = TextView(requireContext()).apply {
+                text = sb.toString()
+                textSize = 11f
+                typeface = android.graphics.Typeface.MONOSPACE
+                setPadding(48, 32, 48, 32)
+                movementMethod = ScrollingMovementMethod.getInstance()
+                isVerticalScrollBarEnabled = true
+                setHorizontallyScrolling(true)
+            }
+
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.easytier_pref_view_logs_title)
+                .setView(textView)
+                .setPositiveButton(android.R.string.ok, null)
+                .setNegativeButton(R.string.easytier_clear_logs) { _, _ ->
+                    EasyTierPlugin.clearLogs()
+                }
+                .show()
+        }
+
+        private fun showNetworkInfoDialog() {
+            val info = try {
+                EasyTierPlugin.getNetworkInfoJsonStatic()
+            } catch (e: Throwable) {
+                "Error: ${e.javaClass.simpleName}: ${e.message}"
+            }
+            val displayText = if (info.isNullOrBlank()) {
+                getString(R.string.easytier_network_info_empty)
+            } else {
+                // Pretty-print JSON if possible
+                try {
+                    val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+                    val parsed = com.google.gson.JsonParser.parseString(info)
+                    gson.toJson(parsed)
+                } catch (e: Exception) {
+                    info
+                }
+            }
+
+            val textView = TextView(requireContext()).apply {
+                text = displayText
+                textSize = 11f
+                typeface = android.graphics.Typeface.MONOSPACE
+                setPadding(48, 32, 48, 32)
+                movementMethod = ScrollingMovementMethod.getInstance()
+                isVerticalScrollBarEnabled = true
+                setHorizontallyScrolling(true)
+            }
+
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.easytier_pref_network_info_title)
+                .setView(textView)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
         }
     }
 }

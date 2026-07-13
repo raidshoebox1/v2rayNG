@@ -50,6 +50,82 @@ class EasyTierPlugin(private val context: Context) {
             "192.168.0.0/16"
         )
 
+        // ------------------------------------------------------------------
+        // In-memory log buffer for UI display
+        // ------------------------------------------------------------------
+
+        data class LogEntry(
+            val timestamp: Long,
+            val level: String,
+            val message: String
+        )
+
+        private const val MAX_LOG_ENTRIES = 500
+        private val logBuffer = mutableListOf<LogEntry>()
+
+        @Volatile
+        private var currentStatus: String = "stopped"
+
+        @Volatile
+        private var lastError: String? = null
+
+        /**
+         * Returns a copy of the current log buffer for UI display.
+         */
+        @JvmStatic
+        fun getLogs(): List<LogEntry> = synchronized(logBuffer) { logBuffer.toList() }
+
+        /**
+         * Returns the current EasyTier status: "stopped", "starting", "running", "error".
+         */
+        @JvmStatic
+        fun getStatus(): String = currentStatus
+
+        /**
+         * Returns the last error message, or null if no error.
+         */
+        @JvmStatic
+        fun getLastError(): String? = lastError
+
+        /**
+         * Clear the log buffer (for UI "clear logs" button).
+         */
+        @JvmStatic
+        fun clearLogs() = synchronized(logBuffer) { logBuffer.clear() }
+
+        /**
+         * Append a log entry to the in-memory buffer and also to Android logcat.
+         * Called from both EasyTierPlugin instance methods and CoreServiceManager.
+         */
+        @JvmStatic
+        fun log(level: String, message: String, throwable: Throwable? = null) {
+            val msg = if (throwable != null) {
+                "$message: ${throwable.javaClass.simpleName}: ${throwable.message}"
+            } else {
+                message
+            }
+            val entry = LogEntry(System.currentTimeMillis(), level, msg)
+            synchronized(logBuffer) {
+                logBuffer.add(entry)
+                if (logBuffer.size > MAX_LOG_ENTRIES) logBuffer.removeAt(0)
+            }
+            when (level) {
+                "E" -> Log.e(TAG, message, throwable)
+                "W" -> Log.w(TAG, message, throwable)
+                "I" -> Log.i(TAG, message)
+                "D" -> Log.d(TAG, message)
+            }
+        }
+
+        internal fun setStatus(status: String, error: String? = null) {
+            currentStatus = status
+            if (status == "running") {
+                lastError = null
+            } else if (error != null) {
+                lastError = error
+            }
+        }
+
         /**
          * Query mesh CIDRs from any running EasyTier instance without needing
          * a plugin object. Returns empty list if no instance is running.
@@ -90,6 +166,20 @@ class EasyTierPlugin(private val context: Context) {
                 emptyList()
             }
         }
+
+        /**
+         * Static version of getNetworkInfoJson() for UI display without
+         * needing a plugin instance. Calls the JNI directly.
+         */
+        @JvmStatic
+        fun getNetworkInfoJsonStatic(): String? {
+            return try {
+                EasyTierJNI.collectNetworkInfos(50)
+            } catch (e: Throwable) {
+                log("W", "Failed to get network info", e)
+                null
+            }
+        }
     }
 
     private var running = false
@@ -110,39 +200,44 @@ class EasyTierPlugin(private val context: Context) {
      */
     fun start(config: EasyTierConfig): Boolean {
         if (running) {
-            Log.w(TAG, "EasyTier instance already running")
+            log("W", "EasyTier instance already running")
             return true
         }
 
         return try {
+            setStatus("starting")
 
             val toml = config.toToml()
-            Log.i(TAG, "Starting EasyTier instance: ${config.instanceName}")
-            Log.d(TAG, "EasyTier TOML config:\n$toml")
+            log("I", "Starting EasyTier instance: ${config.instanceName}")
+            log("D", "EasyTier TOML config:\n$toml")
 
             // Parse first to catch config errors early.
             val parseResult = EasyTierJNI.parseConfig(toml)
             if (parseResult != 0) {
-                val err = EasyTierJNI.getLastError()
-                Log.e(TAG, "EasyTier config parse failed: $err")
+                val err = EasyTierJNI.getLastError() ?: "unknown error (code=$parseResult)"
+                log("E", "EasyTier config parse failed: $err")
+                setStatus("error", err)
                 return false
             }
 
             // Start the network instance.
             val runResult = EasyTierJNI.runNetworkInstance(toml)
             if (runResult != 0) {
-                val err = EasyTierJNI.getLastError()
-                Log.e(TAG, "EasyTier runNetworkInstance failed: $err")
+                val err = EasyTierJNI.getLastError() ?: "unknown error (code=$runResult)"
+                log("E", "EasyTier runNetworkInstance failed: $err")
+                setStatus("error", err)
                 return false
             }
 
             running = true
             currentConfig = config
-            Log.i(TAG, "EasyTier instance '${config.instanceName}' started (SOCKS5 on 127.0.0.1:${config.socks5Port})")
+            setStatus("running")
+            log("I", "EasyTier instance '${config.instanceName}' started (SOCKS5 on 127.0.0.1:${config.socks5Port})")
             true
         } catch (e: Throwable) {
             // Catch Throwable, not just Exception — UnsatisfiedLinkError is an Error
-            Log.e(TAG, "Failed to start EasyTier instance", e)
+            log("E", "Failed to start EasyTier instance", e)
+            setStatus("error", "${e.javaClass.simpleName}: ${e.message}")
             false
         }
     }
@@ -154,12 +249,13 @@ class EasyTierPlugin(private val context: Context) {
         if (!running) return
         try {
             EasyTierJNI.stopAllInstances()
-            Log.i(TAG, "EasyTier instance stopped")
+            log("I", "EasyTier instance stopped")
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to stop EasyTier instance", e)
+            log("E", "Failed to stop EasyTier instance", e)
         } finally {
             running = false
             currentConfig = null
+            setStatus("stopped")
         }
     }
 
@@ -182,7 +278,7 @@ class EasyTierPlugin(private val context: Context) {
             }
             return false
         } catch (e: Throwable) {
-            Log.w(TAG, "isRunning check failed", e)
+            log("W", "isRunning check failed", e)
             return false
         }
     }
@@ -301,7 +397,7 @@ class EasyTierPlugin(private val context: Context) {
             }
             cidrs.toList()
         } catch (e: Throwable) {
-            Log.w(TAG, "Failed to get mesh CIDRs", e)
+            log("W", "Failed to get mesh CIDRs", e)
             emptyList()
         }
     }
