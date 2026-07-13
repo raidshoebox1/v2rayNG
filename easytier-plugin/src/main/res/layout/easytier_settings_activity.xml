@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="?attr/colorSurface"
-        app:title="@string/easytier_settings_entry_title"
+        app:title="@string/easytier_settings_title"
         app:navigationIcon="?attr/homeAsUpIndicator" />
 
     <ScrollView

@@ -78,7 +78,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         val toolbar = findViewById<Toolbar>(R.id.easytier_toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setTitle(R.string.easytier_settings_entry_title)
+        supportActionBar?.setTitle(R.string.easytier_settings_title)
 
         bindViews()
         loadValues()
