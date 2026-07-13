@@ -115,6 +115,22 @@ class EasyTierPlugin(private val context: Context) {
         }
 
         /**
+         * Unregister the JNI log callback, stopping Rust-side logs from
+         * flowing into [logBuffer]. Logs still go to Android logcat.
+         */
+        @JvmStatic
+        fun disableLogCallback() {
+            if (!logCallbackRegistered) return
+            try {
+                EasyTierJNI.setLogCallback(null)
+                logCallbackRegistered = false
+                log("I", "EasyTier: JNI log callback disabled")
+            } catch (e: Throwable) {
+                log("E", "EasyTier: failed to disable JNI log callback", e)
+            }
+        }
+
+        /**
          * Set the EasyTier log level (controls which Rust-side log messages
          * are forwarded to the callback and logcat).
          * @param level one of "off", "error", "warn", "info", "debug", "trace"
@@ -325,14 +341,20 @@ class EasyTierPlugin(private val context: Context) {
         return try {
             setStatus("starting")
 
-            // Register JNI log callback so Rust-side logs flow into logBuffer
-            ensureLogCallbackRegistered()
-            // Set log level from config
-            setLogLevel(config.logLevel)
+            // Register/deregister JNI log callback based on logEnabled setting
+            val logEnabled = EasyTierSettingsManager.isLogEnabled(context)
+            if (logEnabled) {
+                ensureLogCallbackRegistered()
+                setLogLevel(config.logLevel)
+            } else {
+                disableLogCallback()
+            }
 
             val toml = config.toToml()
             log("I", "Starting EasyTier instance: ${config.instanceName}")
-            log("D", "EasyTier TOML config:\n$toml")
+            if (logEnabled) {
+                log("D", "EasyTier TOML config:\n$toml")
+            }
 
             // Parse first to catch config errors early.
             val parseResult = EasyTierJNI.parseConfig(toml)
