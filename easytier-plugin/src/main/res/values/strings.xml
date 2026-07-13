@@ -52,10 +52,16 @@
     <string name="easytier_pref_network_info_summary">Show raw EasyTier network info JSON</string>
 
     <!-- Status values -->
-    <string name="easytier_status_stopped">Stopped</string>
+    <string name="easytier_status_stopped">Stopped — Start v2rayNG VPN or use Start EasyTier below</string>
     <string name="easytier_status_starting">Starting…</string>
     <string name="easytier_status_running">Running</string>
     <string name="easytier_status_error">Error</string>
+
+    <!-- Start/Stop now -->
+    <string name="easytier_pref_start_now_title">Start EasyTier Now</string>
+    <string name="easytier_pref_start_now_summary">Start EasyTier immediately without v2rayNG VPN (for testing)</string>
+    <string name="easytier_pref_stop_now_title">Stop EasyTier</string>
+    <string name="easytier_pref_stop_now_summary">Stop a manually started EasyTier instance</string>
 
     <!-- Log dialog -->
     <string name="easytier_logs_empty">No log entries yet. Start v2rayNG VPN to begin.</string>
