@@ -54,6 +54,16 @@
             app:summary="@string/easytier_status_stopped" />
 
         <Preference
+            app:key="easytier_start_now"
+            app:title="@string/easytier_pref_start_now_title"
+            app:summary="@string/easytier_pref_start_now_summary" />
+
+        <Preference
+            app:key="easytier_stop_now"
+            app:title="@string/easytier_pref_stop_now_title"
+            app:summary="@string/easytier_pref_stop_now_summary" />
+
+        <Preference
             app:key="easytier_view_logs"
             app:title="@string/easytier_pref_view_logs_title"
             app:summary="@string/easytier_pref_view_logs_summary" />

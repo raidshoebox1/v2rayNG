@@ -180,6 +180,65 @@ class EasyTierPlugin(private val context: Context) {
                 null
             }
         }
+
+        // ------------------------------------------------------------------
+        // Static test instance (for manual start/stop from settings UI)
+        // ------------------------------------------------------------------
+
+        @Volatile
+        private var testInstance: EasyTierPlugin? = null
+
+        /**
+         * Start EasyTier from the settings UI without needing v2rayNG VPN.
+         * Uses a static testInstance to avoid conflicting with CoreServiceManager's instance.
+         * @return true if started successfully.
+         */
+        @JvmStatic
+        fun startTest(context: Context, config: EasyTierConfig): Boolean {
+            // Stop any existing test instance first
+            stopTest()
+            log("I", "EasyTier: manual start from settings UI")
+            val plugin = EasyTierPlugin(context)
+            val started = plugin.start(config)
+            if (started) {
+                testInstance = plugin
+            }
+            return started
+        }
+
+        /**
+         * Stop the test instance started from settings UI.
+         */
+        @JvmStatic
+        fun stopTest() {
+            testInstance?.let { plugin ->
+                plugin.stop()
+                testInstance = null
+            }
+        }
+
+        /**
+         * Check if any EasyTier instance is running (either via VPN or test).
+         */
+        @JvmStatic
+        fun isRunningStatic(): Boolean {
+            return try {
+                val json = EasyTierJNI.collectNetworkInfos(10)
+                if (json.isNullOrBlank()) return false
+                val parsed = JsonParser.parseString(json)
+                if (parsed.isJsonObject) {
+                    val mapObj = parsed.asJsonObject.getAsJsonObject("map")
+                        ?: parsed.asJsonObject
+                    for ((_, info) in mapObj.entrySet()) {
+                        val obj = info.asJsonObject
+                        if (obj.has("running") && obj.get("running").asBoolean) return true
+                    }
+                }
+                false
+            } catch (e: Throwable) {
+                false
+            }
+        }
     }
 
     private var running = false

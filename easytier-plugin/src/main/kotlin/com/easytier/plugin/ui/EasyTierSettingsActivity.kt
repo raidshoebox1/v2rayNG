@@ -122,6 +122,26 @@ class EasyTierSettingsActivity : AppCompatActivity() {
                 summary = formatStatus()
             }
 
+            // Start EasyTier now (for testing without VPN)
+            findPreference<Preference>("easytier_start_now")?.setOnPreferenceClickListener {
+                startEasyTierFromSettings()
+                true
+            }
+
+            // Stop EasyTier
+            findPreference<Preference>("easytier_stop_now")?.setOnPreferenceClickListener {
+                EasyTierPlugin.stopTest()
+                // Also stop any VPN-started instance via JNI
+                try {
+                    com.easytier.jni.EasyTierJNI.stopAllInstances()
+                    EasyTierPlugin.log("I", "EasyTier: stopped all instances via stop button")
+                } catch (e: Throwable) {
+                    EasyTierPlugin.log("E", "EasyTier: stop button failed", e)
+                }
+                findPreference<Preference>("easytier_status")?.summary = formatStatus()
+                true
+            }
+
             // View logs preference — shows a dialog with recent EasyTier logs
             findPreference<Preference>("easytier_view_logs")?.setOnPreferenceClickListener {
                 showLogDialog()
@@ -156,6 +176,25 @@ class EasyTierSettingsActivity : AppCompatActivity() {
                 "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
                 else -> getString(R.string.easytier_status_stopped)
             }
+        }
+
+        private fun startEasyTierFromSettings() {
+            val ctx = requireContext()
+            val config = EasyTierSettingsManager.getEasyTierConfig(ctx)
+            if (config == null) {
+                EasyTierPlugin.log("E", "EasyTier: cannot start — plugin disabled or network name empty")
+                android.widget.Toast.makeText(ctx, "Enable EasyTier and set Network Name first", android.widget.Toast.LENGTH_LONG).show()
+                return
+            }
+            EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, peers=${config.peers}, socks5=${config.socks5Port})")
+            val started = EasyTierPlugin.startTest(ctx, config)
+            if (started) {
+                android.widget.Toast.makeText(ctx, "EasyTier started — check Status & Logs", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                android.widget.Toast.makeText(ctx, "EasyTier failed to start — check Logs", android.widget.Toast.LENGTH_LONG).show()
+            }
+            // Refresh status
+            findPreference<Preference>("easytier_status")?.summary = formatStatus()
         }
 
         private fun showLogDialog() {
