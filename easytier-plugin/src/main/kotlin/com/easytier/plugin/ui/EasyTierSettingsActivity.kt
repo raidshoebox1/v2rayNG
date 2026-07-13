@@ -3,7 +3,6 @@ package com.easytier.plugin.ui
 import android.os.Bundle
 import android.text.InputType
 import android.text.method.ScrollingMovementMethod
-import android.view.LayoutInflater
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -119,17 +118,8 @@ class EasyTierSettingsActivity : AppCompatActivity() {
             // Status preference — shows current EasyTier status
             findPreference<Preference>("easytier_status")?.apply {
                 title = getString(R.string.easytier_pref_status_title)
-                summaryProvider = Preference.SummaryProvider<Preference> {
-                    val status = EasyTierPlugin.getStatus()
-                    val error = EasyTierPlugin.getLastError()
-                    val statusText = when (status) {
-                        "running" -> getString(R.string.easytier_status_running)
-                        "starting" -> getString(R.string.easytier_status_starting)
-                        "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
-                        else -> getString(R.string.easytier_status_stopped)
-                    }
-                    statusText
-                }
+                isSelectable = false
+                summary = formatStatus()
             }
 
             // View logs preference — shows a dialog with recent EasyTier logs
@@ -153,17 +143,18 @@ class EasyTierSettingsActivity : AppCompatActivity() {
 
         override fun onResume() {
             super.onResume()
-            // Refresh status summary when returning to the page.
-            // notifyChanged() is protected, so set the summary directly.
-            findPreference<Preference>("easytier_status")?.let { pref ->
-                val status = EasyTierPlugin.getStatus()
-                val error = EasyTierPlugin.getLastError()
-                pref.summary = when (status) {
-                    "running" -> getString(R.string.easytier_status_running)
-                    "starting" -> getString(R.string.easytier_status_starting)
-                    "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
-                    else -> getString(R.string.easytier_status_stopped)
-                }
+            // Refresh status summary when returning to the page
+            findPreference<Preference>("easytier_status")?.summary = formatStatus()
+        }
+
+        private fun formatStatus(): String {
+            val status = EasyTierPlugin.getStatus()
+            val error = EasyTierPlugin.getLastError()
+            return when (status) {
+                "running" -> getString(R.string.easytier_status_running)
+                "starting" -> getString(R.string.easytier_status_starting)
+                "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
+                else -> getString(R.string.easytier_status_stopped)
             }
         }
 
@@ -185,7 +176,6 @@ class EasyTierSettingsActivity : AppCompatActivity() {
                 }
             }
 
-            val inflater = LayoutInflater.from(requireContext())
             val textView = TextView(requireContext()).apply {
                 text = sb.toString()
                 textSize = 11f
