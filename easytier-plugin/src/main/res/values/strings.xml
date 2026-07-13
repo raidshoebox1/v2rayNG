@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- EasyTier Plugin Strings -->
-    <string name="easytier_settings_title">EasyTier Mesh VPN</string>
+    <string name="easytier_settings_title">EasyTier Settings</string>
 
     <!-- Preference Categories -->
     <string name="easytier_pref_category_general">General</string>
