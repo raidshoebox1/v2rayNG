@@ -1374,7 +1374,14 @@ object CoreConfigManager {
                 add("ip", Gson().toJsonTree(lanCidrs))
                 addProperty("outboundTag", EasyTierPlugin.OUTBOUND_TAG)
             }
-            rules.add(0, easyTierRule)
+            // Prepend so it takes priority over the catch-all proxy rule.
+            // JsonArray's add(int, E) is shadowed by Gson's single-arg add() overloads
+            // in Kotlin, so rebuild the array with the easytier rule first.
+            val newRules = com.google.gson.JsonArray()
+            newRules.add(easyTierRule)
+            rules.forEach { newRules.add(it) }
+            routing.remove("rules")
+            routing.add("rules", newRules)
 
             JsonUtil.toJsonPretty(obj) ?: json
         } catch (e: Exception) {
