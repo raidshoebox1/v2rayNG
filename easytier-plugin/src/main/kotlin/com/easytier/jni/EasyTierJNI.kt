@@ -4,6 +4,19 @@ fun interface ConfigServerEventCallback {
     fun onEvent(eventJson: String)
 }
 
+/**
+ * Callback interface for receiving EasyTier log messages in real time.
+ *
+ * Called from Rust background threads via JNI. Each log record is delivered
+ * as three strings:
+ * - [level]: "E", "W", "I", "D", or "T" (error, warn, info, debug, trace)
+ * - [target]: Rust log target (e.g. "CORE", "easytier_android_jni")
+ * - [message]: the formatted log message
+ */
+fun interface LogCallback {
+    fun onLog(level: String, target: String, message: String)
+}
+
 /** EasyTier JNI 接口类 提供 Android 应用调用 EasyTier 核心网络功能的接口 */
 object EasyTierJNI {
     init {
@@ -123,6 +136,20 @@ object EasyTierJNI {
      * @return 错误消息字符串，如果没有错误则返回 null
      */
     @JvmStatic external fun getLastError(): String?
+
+    /**
+     * Set a Java callback to receive EasyTier log messages in real time.
+     * Pass null to clear the callback. Logs are also written to Android logcat
+     * (tag "EasyTier-JNI") regardless.
+     * @param callback a [LogCallback] implementation, or null to clear
+     */
+    @JvmStatic external fun setLogCallback(callback: LogCallback?)
+
+    /**
+     * Set the maximum log level for EasyTier.
+     * @param level one of: "off", "error", "warn", "info", "debug", "trace"
+     */
+    @JvmStatic external fun setLogLevel(level: String)
 
     /**
      * 便利方法：停止所有网络实例
