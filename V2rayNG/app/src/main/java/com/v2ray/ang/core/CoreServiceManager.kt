@@ -348,21 +348,22 @@ object CoreServiceManager {
     private fun startEasyTier(context: Context) {
         val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
         if (etConfig == null || !etConfig.enabled) {
-            LogUtil.d(AppConfig.TAG, "EasyTier: plugin disabled, skipping start")
+            EasyTierPlugin.log("D", "EasyTier: plugin disabled, skipping start")
             return
         }
         try {
+            EasyTierPlugin.log("I", "EasyTier: starting plugin (network=${etConfig.networkName}, socks5=${etConfig.socks5Port}, peers=${etConfig.peers})")
             val plugin = EasyTierPlugin(context)
             val started = plugin.start(etConfig)
             if (started) {
                 easyTierPlugin = plugin
-                LogUtil.i(AppConfig.TAG, "EasyTier: plugin started successfully (network=${etConfig.networkName}, socks5=${etConfig.socks5Port})")
+                EasyTierPlugin.log("I", "EasyTier: plugin started successfully (network=${etConfig.networkName}, socks5=${etConfig.socks5Port})")
             } else {
-                LogUtil.e(AppConfig.TAG, "EasyTier: plugin failed to start")
+                EasyTierPlugin.log("E", "EasyTier: plugin failed to start (status=${EasyTierPlugin.getStatus()}, error=${EasyTierPlugin.getLastError()})")
             }
         } catch (e: Throwable) {
             // Catch Throwable — UnsatisfiedLinkError is an Error, not an Exception
-            LogUtil.e(AppConfig.TAG, "EasyTier: plugin start exception", e)
+            EasyTierPlugin.log("E", "EasyTier: plugin start exception", e)
         }
     }
 
@@ -373,9 +374,9 @@ object CoreServiceManager {
         easyTierPlugin?.let { plugin ->
             try {
                 plugin.stop()
-                LogUtil.i(AppConfig.TAG, "EasyTier: plugin stopped")
+                EasyTierPlugin.log("I", "EasyTier: plugin stopped")
             } catch (e: Throwable) {
-                LogUtil.e(AppConfig.TAG, "EasyTier: plugin stop exception", e)
+                EasyTierPlugin.log("E", "EasyTier: plugin stop exception", e)
             }
         }
         easyTierPlugin = null
