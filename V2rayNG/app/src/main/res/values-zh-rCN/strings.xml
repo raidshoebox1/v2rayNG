@@ -482,4 +482,9 @@
         <item>WebDAV</item>
     </string-array>
 
+    <!-- EasyTier Plugin -->
+    <string name="easytier_category_title">EasyTier 组网</string>
+    <string name="easytier_settings_entry_title">EasyTier 设置</string>
+    <string name="easytier_settings_entry_summary">配置组网（SOCKS5 模式）</string>
+
 </resources>
