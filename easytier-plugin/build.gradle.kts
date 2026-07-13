@@ -35,4 +35,5 @@ dependencies {
     implementation(libs.gson)
     implementation(libs.preference.ktx)
     implementation(libs.androidx.appcompat)
+    implementation(libs.material)
 }
