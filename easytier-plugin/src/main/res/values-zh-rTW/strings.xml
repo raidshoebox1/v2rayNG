@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- EasyTier Plugin Strings -->
+    <string name="easytier_settings_title">EasyTier 組網</string>
+
+    <!-- Preference Categories -->
+    <string name="easytier_pref_category_general">一般</string>
+    <string name="easytier_pref_category_network">網路</string>
+    <string name="easytier_pref_category_advanced">進階</string>
+    <string name="easytier_pref_category_diagnostics">診斷</string>
+
+    <!-- Enable -->
+    <string name="easytier_pref_enable_title">啟用 EasyTier</string>
+    <string name="easytier_pref_enable_summary">在 v2rayNG 旁執行 EasyTier 組網</string>
+
+    <!-- Network Name -->
+    <string name="easytier_pref_network_name_title">網路名稱</string>
+    <string name="easytier_pref_network_name_hint">所有節點必須使用相同的網路名稱</string>
+
+    <!-- Network Secret -->
+    <string name="easytier_pref_network_secret_title">網路金鑰</string>
+    <string name="easytier_pref_network_secret_hint">加密用共享金鑰（留空則不加密）</string>
+
+    <!-- Hostname -->
+    <string name="easytier_pref_hostname_title">主機名稱</string>
+    <string name="easytier_pref_hostname_hint">組網中的節點名稱（留空則使用系統預設值）</string>
+
+    <!-- Virtual IP -->
+    <string name="easytier_pref_virtual_ip_title">虛擬 IP（可選）</string>
+    <string name="easytier_pref_virtual_ip_hint">例如 10.144.144.1 — 留空則自動分配</string>
+
+    <!-- Peers -->
+    <string name="easytier_pref_peers_title">對端位址</string>
+    <string name="easytier_pref_peers_hint">每行一個或逗號分隔，例如 tcp://peer:11010</string>
+
+    <!-- SOCKS5 Port -->
+    <string name="easytier_pref_socks5_port_title">SOCKS5 連接埠</string>
+    <string name="easytier_pref_socks5_port_hint">EasyTier SOCKS5 監聽的本機連接埠</string>
+
+    <!-- No TUN -->
+    <string name="easytier_pref_no_tun_title">無 TUN 模式</string>
+    <string name="easytier_pref_no_tun_summary">必須開啟，以避免與 v2rayNG VPN 衝突</string>
+
+    <!-- Log Level -->
+    <string name="easytier_pref_log_level_title">日誌級別</string>
+
+    <!-- Status -->
+    <string name="easytier_pref_status_title">狀態</string>
+
+    <!-- Diagnostics buttons -->
+    <string name="easytier_pref_start_now_title">立即啟動 EasyTier</string>
+    <string name="easytier_pref_stop_now_title">停止 EasyTier</string>
+    <string name="easytier_pref_view_logs_title">查看日誌</string>
+    <string name="easytier_pref_clear_logs_title">清除日誌</string>
+    <string name="easytier_pref_network_info_title">網路資訊</string>
+
+    <!-- Status values -->
+    <string name="easytier_status_stopped">已停止</string>
+    <string name="easytier_status_starting">啟動中…</string>
+    <string name="easytier_status_running">執行中</string>
+    <string name="easytier_status_error">錯誤</string>
+
+    <!-- Toast messages -->
+    <string name="easytier_started">EasyTier 已啟動 — 請查看下方狀態</string>
+    <string name="easytier_start_failed">EasyTier 啟動失敗 — 請查看日誌</string>
+    <string name="easytier_start_failed_disabled">請先啟用 EasyTier 並設定網路名稱</string>
+    <string name="easytier_logs_cleared">日誌已清除</string>
+
+    <!-- Log dialog -->
+    <string name="easytier_logs_empty">暫無日誌。啟動 v2rayNG VPN 後將開始記錄。</string>
+    <string name="easytier_clear_logs">清除日誌</string>
+    <string name="easytier_network_info_empty">無網路資訊。請確保 EasyTier 已啟用且 v2rayNG VPN 已連線。</string>
+</resources>
