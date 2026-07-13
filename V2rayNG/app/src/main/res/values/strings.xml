@@ -495,4 +495,9 @@
         <item>WebDAV</item>
     </string-array>
 
+    <!-- EasyTier Plugin -->
+    <string name="easytier_category_title">EasyTier Mesh VPN</string>
+    <string name="easytier_settings_entry_title">EasyTier Settings</string>
+    <string name="easytier_settings_entry_summary">Configure mesh network (SOCKS5 mode)</string>
+
 </resources>
