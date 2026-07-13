@@ -31,7 +31,7 @@
 
     <!-- Peers -->
     <string name="easytier_pref_peers_title">Peer Addresses</string>
-    <string name="easytier_pref_peers_hint">One per line or comma-separated, e.g. tcp://peer:11010</string>
+    <string name="easytier_pref_peers_hint">Comma-separated peer URIs, e.g. tcp://1.2.3.4:11010, tcp://5.6.7.8:11010</string>
 
     <!-- SOCKS5 Port -->
     <string name="easytier_pref_socks5_port_title">SOCKS5 Port</string>

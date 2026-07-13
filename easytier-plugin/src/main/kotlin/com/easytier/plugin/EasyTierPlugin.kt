@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.easytier.jni.EasyTierJNI
+import com.easytier.jni.LogCallback
 
 /**
  * EasyTier Plugin for v2rayNG
@@ -68,6 +69,63 @@ class EasyTierPlugin(private val context: Context) {
 
         @Volatile
         private var lastError: String? = null
+
+        /**
+         * JNI log callback that forwards Rust-side EasyTier logs into
+         * [logBuffer] so they appear in the in-app log viewer.
+         * Registered once via [ensureLogCallbackRegistered].
+         */
+        private val jniLogCallback = LogCallback { level, target, message ->
+            // Map JNI log levels to our logBuffer level codes
+            val bufLevel = when (level) {
+                "E" -> "E"
+                "W" -> "W"
+                "I" -> "I"
+                "D" -> "D"
+                "T" -> "D" // trace → debug for buffer display
+                else -> "I"
+            }
+            // Prefix with target for context (e.g. "CORE::peer_manager")
+            val prefixed = if (target.isNotEmpty() && target != "easytier_android_jni") {
+                "[$target] $message"
+            } else {
+                message
+            }
+            log(bufLevel, prefixed)
+        }
+
+        @Volatile
+        private var logCallbackRegistered = false
+
+        /**
+         * Register the JNI log callback so Rust-side logs flow into [logBuffer].
+         * Idempotent — safe to call multiple times.
+         */
+        @JvmStatic
+        fun ensureLogCallbackRegistered() {
+            if (logCallbackRegistered) return
+            try {
+                EasyTierJNI.setLogCallback(jniLogCallback)
+                logCallbackRegistered = true
+                log("I", "EasyTier: JNI log callback registered")
+            } catch (e: Throwable) {
+                log("E", "EasyTier: failed to register JNI log callback", e)
+            }
+        }
+
+        /**
+         * Set the EasyTier log level (controls which Rust-side log messages
+         * are forwarded to the callback and logcat).
+         * @param level one of "off", "error", "warn", "info", "debug", "trace"
+         */
+        @JvmStatic
+        fun setLogLevel(level: String) {
+            try {
+                EasyTierJNI.setLogLevel(level)
+            } catch (e: Throwable) {
+                log("W", "EasyTier: failed to set log level to $level", e)
+            }
+        }
 
         /**
          * Returns a copy of the current log buffer for UI display.
@@ -265,6 +323,11 @@ class EasyTierPlugin(private val context: Context) {
 
         return try {
             setStatus("starting")
+
+            // Register JNI log callback so Rust-side logs flow into logBuffer
+            ensureLogCallbackRegistered()
+            // Set log level from config
+            setLogLevel(config.logLevel)
 
             val toml = config.toToml()
             log("I", "Starting EasyTier instance: ${config.instanceName}")
