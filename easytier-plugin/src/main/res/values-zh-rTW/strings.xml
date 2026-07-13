@@ -6,12 +6,10 @@
     <!-- Preference Categories -->
     <string name="easytier_pref_category_general">一般</string>
     <string name="easytier_pref_category_network">網路</string>
-    <string name="easytier_pref_category_advanced">進階</string>
     <string name="easytier_pref_category_diagnostics">診斷</string>
 
     <!-- Enable -->
-    <string name="easytier_pref_enable_title">啟用 EasyTier</string>
-    <string name="easytier_pref_enable_summary">在 v2rayNG 旁執行 EasyTier 組網</string>
+    <string name="easytier_pref_enable_title">在 v2rayNG 旁路執行 EasyTier 組網</string>
 
     <!-- Network Name -->
     <string name="easytier_pref_network_name_title">網路名稱</string>
@@ -37,11 +35,9 @@
     <string name="easytier_pref_socks5_port_title">SOCKS5 連接埠</string>
     <string name="easytier_pref_socks5_port_hint">EasyTier SOCKS5 監聽的本機連接埠</string>
 
-    <!-- No TUN -->
-    <string name="easytier_pref_no_tun_title">無 TUN 模式</string>
-    <string name="easytier_pref_no_tun_summary">必須開啟，以避免與 v2rayNG VPN 衝突</string>
-
-    <!-- Log Level -->
+    <!-- Log -->
+    <string name="easytier_pref_log_enabled_title">啟用日誌</string>
+    <string name="easytier_pref_log_enabled_summary">擷取 EasyTier 日誌以在應用內顯示</string>
     <string name="easytier_pref_log_level_title">日誌級別</string>
 
     <!-- Status -->

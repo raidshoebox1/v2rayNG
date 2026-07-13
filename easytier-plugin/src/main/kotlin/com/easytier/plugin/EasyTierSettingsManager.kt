@@ -27,7 +27,7 @@ object EasyTierSettingsManager {
     const val KEY_VIRTUAL_IP = PREFIX + "virtual_ip"
     const val KEY_PEERS = PREFIX + "peers"
     const val KEY_SOCKS5_PORT = PREFIX + "socks5_port"
-    const val KEY_NO_TUN = PREFIX + "no_tun"
+    const val KEY_LOG_ENABLED = PREFIX + "log_enabled"
     const val KEY_MTU = PREFIX + "mtu"
     const val KEY_LOG_LEVEL = PREFIX + "log_level"
 
@@ -68,8 +68,8 @@ object EasyTierSettingsManager {
         prefs(context).getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString())?.toIntOrNull()
             ?: DEFAULT_SOCKS5_PORT
 
-    fun isNoTun(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_NO_TUN, true)
+    fun isLogEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LOG_ENABLED, true)
 
     fun getMtu(context: Context): Int? =
         prefs(context).getString(KEY_MTU, null)?.toIntOrNull()
@@ -109,8 +109,8 @@ object EasyTierSettingsManager {
         prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).apply()
     }
 
-    fun setNoTun(context: Context, noTun: Boolean) {
-        prefs(context).edit().putBoolean(KEY_NO_TUN, noTun).apply()
+    fun setLogEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LOG_ENABLED, enabled).apply()
     }
 
     fun setMtu(context: Context, mtu: Int?) {
@@ -143,7 +143,7 @@ object EasyTierSettingsManager {
             virtualIp = getVirtualIp(context),
             peers = getPeers(context),
             socks5Port = getSocks5Port(context),
-            noTun = isNoTun(context),
+            noTun = true, // always on for v2rayNG coexistence
             mtu = getMtu(context),
             logLevel = getLogLevel(context),
         )
