@@ -348,7 +348,7 @@ object CoreServiceManager {
     private fun startEasyTier(context: Context) {
         val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
         if (etConfig == null || !etConfig.enabled) {
-            EasyTierPlugin.log("D", "EasyTier: plugin disabled, skipping start")
+            EasyTierPlugin.log("D", "EasyTier: plugin disabled or network name empty, skipping start (config=$etConfig)")
             return
         }
         try {
