@@ -551,4 +551,9 @@
     <string name="connection_test_empty_message">沒有詳細資訊</string>
     <string name="value_unknown">未知</string>
 
+    <!-- EasyTier Plugin -->
+    <string name="easytier_category_title">EasyTier 組網</string>
+    <string name="easytier_settings_entry_title">EasyTier 設定</string>
+    <string name="easytier_settings_entry_summary">設定組網（SOCKS5 模式）</string>
+
 </resources>
