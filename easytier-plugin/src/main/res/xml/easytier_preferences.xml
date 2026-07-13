@@ -46,4 +46,29 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/easytier_pref_category_diagnostics">
+
+        <Preference
+            app:key="easytier_status"
+            app:title="@string/easytier_pref_status_title"
+            app:summary="@string/easytier_status_stopped"
+            app:selectable="false" />
+
+        <Preference
+            app:key="easytier_view_logs"
+            app:title="@string/easytier_pref_view_logs_title"
+            app:summary="@string/easytier_pref_view_logs_summary" />
+
+        <Preference
+            app:key="easytier_clear_logs"
+            app:title="@string/easytier_pref_clear_logs_title"
+            app:summary="@string/easytier_pref_clear_logs_summary" />
+
+        <Preference
+            app:key="easytier_network_info"
+            app:title="@string/easytier_pref_network_info_title"
+            app:summary="@string/easytier_pref_network_info_summary" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>
