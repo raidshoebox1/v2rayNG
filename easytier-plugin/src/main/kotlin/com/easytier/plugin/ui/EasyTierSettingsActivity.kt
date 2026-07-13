@@ -51,7 +51,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     private lateinit var etVirtualIp: EditText
     private lateinit var etPeers: EditText
     private lateinit var etSocks5Port: EditText
-    private lateinit var swNoTun: SwitchCompat
+    private lateinit var swLogEnabled: SwitchCompat
     private lateinit var spLogLevel: Spinner
     private lateinit var tvStatus: TextView
 
@@ -78,7 +78,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         val toolbar = findViewById<Toolbar>(R.id.easytier_toolbar)
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.setTitle(R.string.easytier_settings_title)
+        supportActionBar?.setTitle(R.string.easytier_settings_entry_title)
 
         bindViews()
         loadValues()
@@ -106,7 +106,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         etVirtualIp = findViewById(R.id.et_virtual_ip)
         etPeers = findViewById(R.id.et_peers)
         etSocks5Port = findViewById(R.id.et_socks5_port)
-        swNoTun = findViewById(R.id.sw_no_tun)
+        swLogEnabled = findViewById(R.id.sw_log_enabled)
         spLogLevel = findViewById(R.id.sp_log_level)
         tvStatus = findViewById(R.id.tv_status)
     }
@@ -123,7 +123,9 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         etVirtualIp.setText(EasyTierSettingsManager.getVirtualIp(ctx) ?: "")
         etPeers.setText(EasyTierSettingsManager.getPeers(ctx).joinToString("\n"))
         etSocks5Port.setText(EasyTierSettingsManager.getSocks5Port(ctx).toString())
-        swNoTun.isChecked = true // always on for v2rayNG coexistence
+
+        swLogEnabled.isChecked = EasyTierSettingsManager.isLogEnabled(ctx)
+        spLogLevel.isEnabled = EasyTierSettingsManager.isLogEnabled(ctx)
 
         val currentLevel = EasyTierSettingsManager.getLogLevel(ctx)
         spLogLevel.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, logLevels).also {
@@ -151,6 +153,13 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         etVirtualIp.onFocusChangeListener = focusListener
         etPeers.onFocusChangeListener = focusListener
         etSocks5Port.onFocusChangeListener = focusListener
+
+        swLogEnabled.setOnCheckedChangeListener { _, isChecked ->
+            if (!isLoading) {
+                EasyTierSettingsManager.setLogEnabled(applicationContext, isChecked)
+                spLogLevel.isEnabled = isChecked
+            }
+        }
 
         spLogLevel.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {

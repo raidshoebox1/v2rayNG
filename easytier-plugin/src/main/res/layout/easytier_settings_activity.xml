@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="?attr/colorSurface"
-        app:title="@string/easytier_settings_title"
+        app:title="@string/easytier_settings_entry_title"
         app:navigationIcon="?attr/homeAsUpIndicator" />
 
     <ScrollView
@@ -41,14 +41,6 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="@string/easytier_pref_enable_title" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/easytier_pref_enable_summary"
-                android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-                android:textColor="?android:attr/textColorSecondary" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -151,45 +143,6 @@
                 android:inputType="number"
                 android:maxLines="1" />
 
-            <!-- ── Advanced ── -->
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="@string/easytier_pref_category_advanced"
-                android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
-                android:textColor="?attr/colorPrimary" />
-
-            <androidx.appcompat.widget.SwitchCompat
-                android:id="@+id/sw_no_tun"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:checked="true"
-                android:enabled="false"
-                android:text="@string/easytier_pref_no_tun_title" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/easytier_pref_no_tun_summary"
-                android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-                android:textColor="?android:attr/textColorSecondary" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/easytier_pref_log_level_title"
-                android:textAppearance="@style/TextAppearance.AppCompat.Caption" />
-
-            <Spinner
-                android:id="@+id/sp_log_level"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
             <!-- ── Diagnostics ── -->
 
             <TextView
@@ -214,6 +167,33 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/sw_log_enabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/easytier_pref_log_enabled_title" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/easytier_pref_log_enabled_summary"
+                android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+                android:textColor="?android:attr/textColorSecondary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/easytier_pref_log_level_title"
+                android:textAppearance="@style/TextAppearance.AppCompat.Caption" />
+
+            <Spinner
+                android:id="@+id/sp_log_level"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_start"
