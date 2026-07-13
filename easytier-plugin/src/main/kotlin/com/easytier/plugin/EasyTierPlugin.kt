@@ -99,7 +99,8 @@ class EasyTierPlugin(private val context: Context) {
 
         /**
          * Register the JNI log callback so Rust-side logs flow into [logBuffer].
-         * Idempotent — safe to call multiple times.
+         * Idempotent — safe to call multiple times. The callback stays registered
+         * for the lifetime of the process; subsequent calls are no-ops.
          */
         @JvmStatic
         fun ensureLogCallbackRegistered() {
