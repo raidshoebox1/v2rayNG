@@ -54,30 +54,31 @@ data class EasyTierConfig(
         // ─── TOP-LEVEL FIELDS (must come before any [section] in TOML) ───
 
         // instance_name (top-level)
-        sb.appendLine("""instance_name = "$instanceName"""")
+        sb.appendLine("instance_name = \"${escapeTomlString(instanceName)}\"")
 
         // hostname (top-level, optional) — node name shown in mesh peer list.
         // Rust Config field: hostname: Option<String>
         // If empty/omitted, EasyTier falls back to the OS hostname (usually "localhost" on Android).
         // Max 32 chars; control chars stripped by EasyTier's get_hostname().
         if (!hostname.isNullOrBlank()) {
-            val safe = hostname!!.replace("\"", "\\\"")
-            sb.appendLine("""hostname = "$safe"""")
+            sb.appendLine("hostname = \"${escapeTomlString(hostname)}\"")
         }
 
-        // SOCKS5 proxy listener — top-level field
+        // SOCKS5 proxy listener — top-level field.
+        // Bind to 127.0.0.1 (loopback only) so the SOCKS5 port is NOT exposed to
+        // other devices on the LAN. Xray-core connects in-process via 127.0.0.1.
         // Rust Config field: socks5_proxy: Option<url::Url>
-        sb.appendLine("""socks5_proxy = "socks5://0.0.0.0:$socks5Port"""")
+        sb.appendLine("socks5_proxy = \"socks5://127.0.0.1:$socks5Port\"")
 
         // listeners (optional, for peer discovery — NOT for SOCKS5)
         // EasyTier listener schemes: tcp://, udp://, wg://, ws://, wss://
         if (listeners.isNotEmpty()) {
-            sb.appendLine("listeners = [${listeners.joinToString(", ") { "\"$it\"" }}]")
+            sb.appendLine("listeners = [${listeners.joinToString(", ") { "\"${escapeTomlString(it)}\"" }}]")
         }
 
         // virtual IP (optional, top-level field)
         if (!virtualIp.isNullOrBlank()) {
-            sb.appendLine("""ipv4 = "$virtualIp"""")
+            sb.appendLine("ipv4 = \"${escapeTomlString(virtualIp)}\"")
         }
 
         // ─── SECTIONS (must come after all top-level fields) ───
@@ -85,9 +86,9 @@ data class EasyTierConfig(
         // network_identity section
         sb.appendLine()
         sb.appendLine("[network_identity]")
-        sb.appendLine("""network_name = "$networkName"""")
+        sb.appendLine("network_name = \"${escapeTomlString(networkName)}\"")
         if (networkSecret.isNotEmpty()) {
-            sb.appendLine("""network_secret = "$networkSecret"""")
+            sb.appendLine("network_secret = \"${escapeTomlString(networkSecret)}\"")
         }
 
         // peers — must use [[peer]] array-of-tables syntax
@@ -95,7 +96,7 @@ data class EasyTierConfig(
         for (peer in peers) {
             sb.appendLine()
             sb.appendLine("[[peer]]")
-            sb.appendLine("""uri = "$peer"""")
+            sb.appendLine("uri = \"${escapeTomlString(peer)}\"")
         }
 
         // flags section — no_tun is critical for v2rayNG coexistence
@@ -112,37 +113,23 @@ data class EasyTierConfig(
 
     companion object {
         /**
-         * Create an [EasyTierConfig] from a flat key-value map (e.g. from MMKV settings).
+         * Escape a string for safe embedding in a TOML basic string.
          *
-         * Expected keys (all optional except `network_name`):
-         * - `easytier_enabled` (Boolean)
-         * - `easytier_hostname` (String, optional)
-         * - `easytier_network_name` (String)
-         * - `easytier_network_secret` (String)
-         * - `easytier_virtual_ip` (String)
-         * - `easytier_peers` (String, comma-separated)
-         * - `easytier_socks5_port` (Int or String)
-         * - `easytier_no_tun` (Boolean, default true)
-         * - `easytier_log_level` (String, default "warn")
+         * Handles backslash and double-quote (the two characters that must be
+         * escaped in TOML basic strings) and strips control characters that
+         * could break the TOML structure or confuse the parser. Newlines and
+         * other control chars are replaced with a space to keep the value on
+         * a single line.
          */
-        fun fromMap(map: Map<String, Any?>): EasyTierConfig {
-            return EasyTierConfig(
-                enabled = map["easytier_enabled"] as? Boolean ?: false,
-                hostname = (map["easytier_hostname"] as? String)?.takeIf { it.isNotBlank() },
-                networkName = map["easytier_network_name"] as? String ?: "",
-                networkSecret = map["easytier_network_secret"] as? String ?: "",
-                virtualIp = (map["easytier_virtual_ip"] as? String)?.takeIf { it.isNotBlank() },
-                peers = (map["easytier_peers"] as? String)
-                    ?.split(",")
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
-                    ?: emptyList(),
-                socks5Port = (map["easytier_socks5_port"] as? Number)?.toInt()
-                    ?: (map["easytier_socks5_port"] as? String)?.toIntOrNull()
-                    ?: EasyTierPlugin.DEFAULT_SOCKS5_PORT,
-                noTun = map["easytier_no_tun"] as? Boolean ?: true,
-                logLevel = map["easytier_log_level"] as? String ?: "warn",
-            )
+        private fun escapeTomlString(value: String?): String {
+            if (value.isNullOrEmpty()) return ""
+            return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", " ")
+                .replace("\r", " ")
+                .replace("\t", " ")
+                .filter { it.code >= 0x20 } // strip remaining control chars
         }
     }
 }
