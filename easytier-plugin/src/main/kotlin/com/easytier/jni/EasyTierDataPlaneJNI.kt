@@ -9,6 +9,13 @@ import kotlinx.coroutines.withContext
 /**
  * EasyTier data-plane API for Android.
  *
+ * **NOTE: This file is currently RESERVED and not used by v2rayNG or the
+ * EasyTier plugin.** It is included for future use when data-plane TCP/UDP
+ * socket APIs are needed. The native JNI methods it declares may not be
+ * present in all builds of `libeasytier_android_jni.so`. Do not call these
+ * methods without verifying native availability via [EasyTierPlugin.isJniAvailable]
+ * and wrapping calls in try/catch for `UnsatisfiedLinkError`.
+ *
  * Dataplane APIs do not create or start an EasyTier instance by themselves.
  * Start an instance with [EasyTierJNI.runNetworkInstance] first, then pass the
  * same `instanceName` to [EasyTierDataPlane.tcpConnect],

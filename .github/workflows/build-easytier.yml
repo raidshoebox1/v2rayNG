@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      build_release:
+        description: 'Build release APK (unsigned) instead of debug'
+        required: false
+        type: boolean
+        default: false
       abi_filters:
         description: 'ABI filters (semicolon-separated, e.g. arm64-v8a;armeabi-v7a)'
         required: false
@@ -227,12 +232,16 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Build APK (debug)
+      - name: Build APK
         run: |
           cd ${{ github.workspace }}/V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           chmod 755 gradlew
-          ./gradlew assembleDebug
+          if [ "${{ inputs.build_release }}" = "true" ]; then
+            ./gradlew assembleRelease
+          else
+            ./gradlew assembleDebug
+          fi
 
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
