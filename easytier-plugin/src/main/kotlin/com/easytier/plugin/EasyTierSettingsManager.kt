@@ -64,9 +64,10 @@ object EasyTierSettingsManager {
             ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
-    fun getSocks5Port(context: Context): Int =
-        prefs(context).getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString())?.toIntOrNull()
-            ?: DEFAULT_SOCKS5_PORT
+    fun getSocks5Port(context: Context): Int {
+        val stored = prefs(context).getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString())?.toIntOrNull()
+        return if (stored != null && stored in 1..65535) stored else DEFAULT_SOCKS5_PORT
+    }
 
     fun isLogEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_LOG_ENABLED, true)
@@ -106,7 +107,9 @@ object EasyTierSettingsManager {
     }
 
     fun setSocks5Port(context: Context, port: Int) {
-        prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).apply()
+        if (port in 1..65535) {
+            prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).apply()
+        }
     }
 
     fun setLogEnabled(context: Context, enabled: Boolean) {
@@ -147,5 +150,4 @@ object EasyTierSettingsManager {
             mtu = getMtu(context),
             logLevel = getLogLevel(context),
         )
-    }
-}
+    }}

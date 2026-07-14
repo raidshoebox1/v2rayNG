@@ -60,6 +60,11 @@
     <string name="easytier_start_failed_disabled">Enable EasyTier and set Network Name first</string>
     <string name="easytier_logs_cleared">Logs cleared</string>
 
+    <!-- Validation errors -->
+    <string name="easytier_invalid_virtual_ip">Invalid virtual IP (expected: 10.144.144.1 or 10.144.144.1/24)</string>
+    <string name="easytier_invalid_peer">Invalid peer URI: %1$s</string>
+    <string name="easytier_invalid_port">Port must be between 1 and 65535</string>
+
     <!-- Log dialog -->
     <string name="easytier_logs_empty">No log entries yet. Start v2rayNG VPN to begin.</string>
     <string name="easytier_clear_logs">Clear Logs</string>
