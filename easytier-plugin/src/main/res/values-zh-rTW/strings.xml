@@ -62,6 +62,11 @@
     <string name="easytier_start_failed_disabled">請先啟用 EasyTier 並設定網路名稱</string>
     <string name="easytier_logs_cleared">日誌已清除</string>
 
+    <!-- Validation errors -->
+    <string name="easytier_invalid_virtual_ip">虛擬 IP 格式無效（應為 10.144.144.1 或 10.144.144.1/24）</string>
+    <string name="easytier_invalid_peer">無效的對端位址：%1$s</string>
+    <string name="easytier_invalid_port">連接埠必須在 1 到 65535 之間</string>
+
     <!-- Log dialog -->
     <string name="easytier_logs_empty">暫無日誌。啟動 v2rayNG VPN 後將開始記錄。</string>
     <string name="easytier_clear_logs">清除日誌</string>
