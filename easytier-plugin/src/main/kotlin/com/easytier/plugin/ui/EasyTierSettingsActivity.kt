@@ -28,20 +28,15 @@ import java.util.Locale
  * selection change (Switch/Spinner).  Diagnostic buttons at the bottom
  * allow starting/stopping EasyTier and viewing logs/network info.
  *
- * Locale is provided by the launching app via [localeOverride] so the
- * plugin (which cannot access v2rayNG's SettingsManager) still respects
- * the user's language choice.
+ * Locale is provided by the launching app via the [EXTRA_LOCALE] intent
+ * extra so the plugin (which cannot access v2rayNG's SettingsManager)
+ * still respects the user's language choice.
  */
 class EasyTierSettingsActivity : AppCompatActivity() {
 
     companion object {
-        /**
-         * Set by the app before launching this activity so that
-         * [attachBaseContext] can wrap the locale.
-         * Format: BCP-47 language tag, e.g. "zh-CN", "vi", "ru".
-         */
-        @Volatile
-        var localeOverride: String? = null
+        /** Optional BCP-47 language tag (e.g. "zh-CN", "vi") passed by the launcher. */
+        const val EXTRA_LOCALE = "easytier_locale"
     }
 
     private lateinit var swEnable: SwitchCompat
@@ -59,7 +54,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     private var isLoading = false
 
     override fun attachBaseContext(newBase: Context) {
-        val tag = localeOverride
+        val tag = newBase.getStringExtra(EXTRA_LOCALE)
         if (!tag.isNullOrBlank()) {
             val locale = Locale.forLanguageTag(tag)
             val config = Configuration(newBase.resources.configuration)
@@ -89,6 +84,17 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshStatus()
+    }
+
+    /**
+     * Save all fields when the activity is paused.  EditText fields normally
+     * save on focus loss, but the currently-focused field may not lose focus
+     * before the activity is destroyed (e.g. user presses the back button),
+     * causing v2rayNG to read stale settings.
+     */
+    override fun onPause() {
+        super.onPause()
+        saveAllFields()
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -175,18 +181,34 @@ class EasyTierSettingsActivity : AppCompatActivity() {
             R.id.et_network_name -> EasyTierSettingsManager.setNetworkName(ctx, etNetworkName.text.toString().trim())
             R.id.et_network_secret -> EasyTierSettingsManager.setNetworkSecret(ctx, etNetworkSecret.text.toString())
             R.id.et_hostname -> EasyTierSettingsManager.setHostname(ctx, etHostname.text.toString().trim().ifEmpty { null })
-            R.id.et_virtual_ip -> EasyTierSettingsManager.setVirtualIp(ctx, etVirtualIp.text.toString().trim().ifEmpty { null })
+            R.id.et_virtual_ip -> {
+                val ip = etVirtualIp.text.toString().trim()
+                if (ip.isEmpty() || isValidVirtualIp(ip)) {
+                    EasyTierSettingsManager.setVirtualIp(ctx, ip.ifEmpty { null })
+                } else {
+                    Toast.makeText(this, R.string.easytier_invalid_virtual_ip, Toast.LENGTH_SHORT).show()
+                }
+            }
             R.id.et_peers -> {
                 val peers = etPeers.text.toString()
                     .split("\n", ",")
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
-                EasyTierSettingsManager.setPeers(ctx, peers)
+                val invalid = peers.filter { !isValidPeerUri(it) }
+                if (invalid.isEmpty()) {
+                    EasyTierSettingsManager.setPeers(ctx, peers)
+                } else {
+                    Toast.makeText(this, getString(R.string.easytier_invalid_peer, invalid.first()), Toast.LENGTH_LONG).show()
+                }
             }
             R.id.et_socks5_port -> {
                 val port = etSocks5Port.text.toString().toIntOrNull()
                 if (port != null && port in 1..65535) {
                     EasyTierSettingsManager.setSocks5Port(ctx, port)
+                } else {
+                    Toast.makeText(this, R.string.easytier_invalid_port, Toast.LENGTH_SHORT).show()
+                    // Restore the saved value
+                    etSocks5Port.setText(EasyTierSettingsManager.getSocks5Port(ctx).toString())
                 }
             }
         }
@@ -200,6 +222,40 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         saveField(R.id.et_virtual_ip)
         saveField(R.id.et_peers)
         saveField(R.id.et_socks5_port)
+    }
+
+    // ── Input validation ──
+
+    /** Valid EasyTier peer URI schemes. */
+    private val peerSchemes = setOf("tcp", "udp", "ws", "wss", "wg", "ring")
+
+    /**
+     * Validate a peer URI.  Accepts schemes: tcp://, udp://, ws://, wss://, wg://, ring://.
+     * Also accepts plain `host:port` (treated as TCP by EasyTier).
+     */
+    private fun isValidPeerUri(uri: String): Boolean {
+        val scheme = uri.substringBefore("://", "")
+        if (scheme.isNotEmpty()) return scheme.lowercase() in peerSchemes
+        // Plain host:port — accept if it looks like host:port or a valid hostname
+        return uri.contains(":") || uri.contains(".")
+    }
+
+    /**
+     * Validate a virtual IP address.  Accepts IPv4 (a.b.c.d) or IPv4 with CIDR (a.b.c.d/n).
+     */
+    private fun isValidVirtualIp(ip: String): Boolean {
+        val cidrRegex = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(/(\d{1,2}))?$""")
+        val m = cidrRegex.matchEntire(ip.trim()) ?: return false
+        val o1 = m.groupValues[1].toIntOrNull() ?: return false
+        val o2 = m.groupValues[2].toIntOrNull() ?: return false
+        val o3 = m.groupValues[3].toIntOrNull() ?: return false
+        val o4 = m.groupValues[4].toIntOrNull() ?: return false
+        if (o1 !in 0..255 || o2 !in 0..255 || o3 !in 0..255 || o4 !in 0..255) return false
+        if (m.groupValues[5].isNotEmpty()) {
+            val prefix = m.groupValues[6].toIntOrNull() ?: return false
+            if (prefix !in 0..32) return false
+        }
+        return true
     }
 
     // ── Diagnostics ──
@@ -235,7 +291,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.easytier_start_failed_disabled, Toast.LENGTH_LONG).show()
             return
         }
-        EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, hostname=${config.hostname}, peers=${config.peers}, socks5=${config.socks5Port})")
+        EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, hostname=${config.hostname}, peers=${config.peers.size} peer(s), socks5=${config.socks5Port})")
         val started = EasyTierPlugin.startTest(ctx, config)
         if (started) {
             Toast.makeText(this, R.string.easytier_started, Toast.LENGTH_SHORT).show()
@@ -246,13 +302,11 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     }
 
     private fun stopEasyTier() {
+        // Only stop the test instance started from this UI.
+        // Do NOT call EasyTierJNI.stopAllInstances() here — that would also
+        // kill the VPN service's EasyTier instance (started by CoreServiceManager),
+        // breaking the active VPN connection.
         EasyTierPlugin.stopTest()
-        try {
-            com.easytier.jni.EasyTierJNI.stopAllInstances()
-            EasyTierPlugin.log("I", "EasyTier: stopped all instances via stop button")
-        } catch (e: Throwable) {
-            EasyTierPlugin.log("E", "EasyTier: stop button failed", e)
-        }
         refreshStatus()
     }
 
