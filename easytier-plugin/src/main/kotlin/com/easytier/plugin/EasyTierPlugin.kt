@@ -2,11 +2,10 @@ package com.easytier.plugin
 
 import android.content.Context
 import android.util.Log
-import com.google.gson.Gson
-import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.LogCallback
+import com.easytier.plugin.BuildConfig
 
 /**
  * EasyTier Plugin for v2rayNG
@@ -18,20 +17,13 @@ import com.easytier.jni.LogCallback
  *
  * Lifecycle:
  *   1. [start] — parse config, run EasyTier instance (no-tun, SOCKS5 only)
- *   2. [buildOutboundJson] — produce an Xray-core SOCKS5 outbound JSON fragment
- *   3. [buildRoutingRules] — produce routing rules that direct LAN/mesh CIDRs to EasyTier
- *   4. [stop] — stop the EasyTier instance
+ *   2. [stop] — stop the EasyTier instance
  *
  * The native library is loaded lazily on first [start] to avoid crashes on
  * devices/architectures where the .so is not present.
  */
 class EasyTierPlugin(private val context: Context) {
 
-    /**
-     * Static version of getMeshCidrs() that does not require a plugin instance.
-     * Calls the JNI directly — only returns meaningful results when an EasyTier
-     * instance is actually running (started via start()).
-     */
     companion object {
         private const val TAG = "EasyTierPlugin"
 
@@ -50,6 +42,33 @@ class EasyTierPlugin(private val context: Context) {
             "172.16.0.0/12",
             "192.168.0.0/16"
         )
+
+        /**
+         * Check whether the EasyTier native library is available on this device.
+         * The result is cached after the first check so subsequent calls are free.
+         * Returns false on architectures where the .so is not bundled.
+         */
+        @Volatile
+        private var jniAvailabilityCached: Boolean? = null
+
+        @JvmStatic
+        fun isJniAvailable(): Boolean {
+            jniAvailabilityCached?.let { return it }
+            val available = try {
+                EasyTierJNI.getLastError()
+                true
+            } catch (e: UnsatisfiedLinkError) {
+                false
+            } catch (e: Throwable) {
+                // Any other throwable during class init also means JNI is unavailable
+                false
+            }
+            jniAvailabilityCached = available
+            if (!available) {
+                Log.w(TAG, "EasyTier JNI native library not available on this device")
+            }
+            return available
+        }
 
         // ------------------------------------------------------------------
         // In-memory log buffer for UI display
@@ -170,6 +189,12 @@ class EasyTierPlugin(private val context: Context) {
 
         /**
          * Append a log entry to the in-memory buffer and also to Android logcat.
+         *
+         * In release builds the in-memory buffer always receives the entry (for
+         * the in-app log viewer), but logcat output is restricted to W/E to avoid
+         * leaking sensitive information (peer URIs, network secrets, mesh CIDRs)
+         * via a world-readable logcat on rooted devices or ADB.
+         *
          * Called from both EasyTierPlugin instance methods and CoreServiceManager.
          */
         @JvmStatic
@@ -184,11 +209,12 @@ class EasyTierPlugin(private val context: Context) {
                 logBuffer.add(entry)
                 if (logBuffer.size > MAX_LOG_ENTRIES) logBuffer.removeAt(0)
             }
+            // In release builds suppress I/D logs from logcat to reduce info leakage.
             when (level) {
                 "E" -> Log.e(TAG, message, throwable)
                 "W" -> Log.w(TAG, message, throwable)
-                "I" -> Log.i(TAG, message)
-                "D" -> Log.d(TAG, message)
+                "I" -> if (BuildConfig.DEBUG) Log.i(TAG, message)
+                "D" -> if (BuildConfig.DEBUG) Log.d(TAG, message)
             }
         }
 
@@ -204,9 +230,43 @@ class EasyTierPlugin(private val context: Context) {
         /**
          * Query mesh CIDRs from any running EasyTier instance without needing
          * a plugin object. Returns empty list if no instance is running.
+         *
+         * Results are cached for [MESH_CIDR_CACHE_TTL_MS] to avoid repeated
+         * JNI RPC calls during a single VPN start flow (which may invoke this
+         * 3-5 times across CoreConfigManager, CoreVpnService, RootProxyManager).
          */
+        @Volatile
+        private var meshCidrsCache: List<String>? = null
+        @Volatile
+        private var meshCidrsCacheTime: Long = 0L
+        private const val MESH_CIDR_CACHE_TTL_MS = 5_000L // 5 seconds
+
         @JvmStatic
         fun getMeshCidrsStatic(): List<String> {
+            if (!isJniAvailable()) return emptyList()
+            val now = System.currentTimeMillis()
+            meshCidrsCache?.let { cached ->
+                if (now - meshCidrsCacheTime < MESH_CIDR_CACHE_TTL_MS) {
+                    return cached
+                }
+            }
+            val result = collectMeshCidrs()
+            meshCidrsCache = result
+            meshCidrsCacheTime = now
+            return result
+        }
+
+        /**
+         * Force-clear the mesh CIDR cache. Call after stopping EasyTier or
+         * when the caller knows the network topology has changed.
+         */
+        @JvmStatic
+        fun clearMeshCidrsCache() {
+            meshCidrsCache = null
+            meshCidrsCacheTime = 0L
+        }
+
+        private fun collectMeshCidrs(): List<String> {
             return try {
                 val json = EasyTierJNI.collectNetworkInfos(10)
                 if (json.isNullOrBlank()) return emptyList()
@@ -248,6 +308,7 @@ class EasyTierPlugin(private val context: Context) {
          */
         @JvmStatic
         fun getNetworkInfoJsonStatic(): String? {
+            if (!isJniAvailable()) return null
             return try {
                 EasyTierJNI.collectNetworkInfos(50)
             } catch (e: Throwable) {
@@ -297,6 +358,7 @@ class EasyTierPlugin(private val context: Context) {
          */
         @JvmStatic
         fun isRunningStatic(): Boolean {
+            if (!isJniAvailable()) return false
             return try {
                 val json = EasyTierJNI.collectNetworkInfos(10)
                 if (json.isNullOrBlank()) return false
@@ -316,7 +378,9 @@ class EasyTierPlugin(private val context: Context) {
         }
     }
 
+    @Volatile
     private var running = false
+    @Volatile
     private var currentConfig: EasyTierConfig? = null
 
     // ------------------------------------------------------------------
@@ -327,8 +391,8 @@ class EasyTierPlugin(private val context: Context) {
      * Start the EasyTier mesh instance with the given configuration.
      *
      * The instance runs in **no-tun** mode with a SOCKS5 listener on
-     * [EasyTierConfig.socks5Port].  It does NOT create an Android VPN
-     * interface, so it peacefully coexists with v2rayNG's VpnService.
+     * [EasyTierConfig.socks5Port] (loopback only).  It does NOT create an
+     * Android VPN interface, so it peacefully coexists with v2rayNG's VpnService.
      *
      * @return `true` if the instance started successfully.
      */
@@ -352,8 +416,10 @@ class EasyTierPlugin(private val context: Context) {
 
             val toml = config.toToml()
             log("I", "Starting EasyTier instance: ${config.instanceName}")
-            if (logEnabled) {
-                log("D", "EasyTier TOML config:\n$toml")
+            // Do NOT log the full TOML — it contains network_secret in cleartext.
+            // Only log non-sensitive fields at debug level.
+            if (logEnabled && BuildConfig.DEBUG) {
+                log("D", "EasyTier config: instance=${config.instanceName}, network=${config.networkName}, peers=${config.peers.size}, socks5=${config.socks5Port}, noTun=${config.noTun}")
             }
 
             // Parse first to catch config errors early.
@@ -376,6 +442,7 @@ class EasyTierPlugin(private val context: Context) {
 
             running = true
             currentConfig = config
+            clearMeshCidrsCache()
             setStatus("running")
             log("I", "EasyTier instance '${config.instanceName}' started (SOCKS5 on 127.0.0.1:${config.socks5Port})")
             true
@@ -389,6 +456,11 @@ class EasyTierPlugin(private val context: Context) {
 
     /**
      * Stop the EasyTier mesh instance.
+     *
+     * Calls [EasyTierJNI.stopAllInstances] to stop all running EasyTier
+     * instances.  This is intentional — there should only ever be one
+     * EasyTier instance (the VPN service's), and a global stop ensures
+     * cleanup even if internal state is inconsistent.
      */
     fun stop() {
         if (!running) return
@@ -400,6 +472,7 @@ class EasyTierPlugin(private val context: Context) {
         } finally {
             running = false
             currentConfig = null
+            clearMeshCidrsCache()
             setStatus("stopped")
         }
     }
@@ -410,8 +483,6 @@ class EasyTierPlugin(private val context: Context) {
         return try {
             val json = EasyTierJNI.collectNetworkInfos(10)
             if (json.isNullOrBlank()) return false
-            // collectNetworkInfos returns NetworkInstanceRunningInfoMap:
-            // {"map": {"instance_name": {"running": true, ...}}}
             val parsed = JsonParser.parseString(json)
             if (parsed.isJsonObject) {
                 val mapObj = parsed.asJsonObject.getAsJsonObject("map")
@@ -421,151 +492,10 @@ class EasyTierPlugin(private val context: Context) {
                     if (obj.has("running") && obj.get("running").asBoolean) return true
                 }
             }
-            return false
+            false
         } catch (e: Throwable) {
             log("W", "isRunning check failed", e)
-            return false
-        }
-    }
-
-    /**
-     * Get the SOCKS5 endpoint for the running EasyTier instance.
-     * Returns `null` if the instance is not running.
-     */
-    fun getSocks5Endpoint(): Socks5Endpoint? {
-        val cfg = currentConfig ?: return null
-        if (!running) return null
-        return Socks5Endpoint("127.0.0.1", cfg.socks5Port)
-    }
-
-    // ------------------------------------------------------------------
-    // Xray-core config injection helpers
-    // ------------------------------------------------------------------
-
-    /**
-     * Build an Xray-core outbound JSON object for the EasyTier SOCKS5 endpoint.
-     *
-     * This can be appended to the `outbounds` array in the Xray config.
-     *
-     * ```json
-     * {
-     *   "tag": "easytier",
-     *   "protocol": "socks",
-     *   "settings": {
-     *     "servers": [{ "address": "127.0.0.1", "port": 10852 }]
-     *   }
-     * }
-     * ```
-     */
-    fun buildOutboundJson(): JsonObject? {
-        val cfg = currentConfig ?: return null
-        if (!running) return null
-
-        val outbound = JsonObject()
-        outbound.addProperty("tag", OUTBOUND_TAG)
-        outbound.addProperty("protocol", "socks")
-
-        val settings = JsonObject()
-        val servers = com.google.gson.JsonArray()
-        val server = JsonObject()
-        server.addProperty("address", "127.0.0.1")
-        server.addProperty("port", cfg.socks5Port)
-        servers.add(server)
-        settings.add("servers", servers)
-        outbound.add("settings", settings)
-
-        return outbound
-    }
-
-    /**
-     * Build Xray-core routing rule JSON objects that direct internal/mesh
-     * traffic to the EasyTier outbound.
-     *
-     * @param customCidrs Additional CIDRs to route through EasyTier (merged with [DEFAULT_LAN_CIDRS]).
-     * @return A list of routing rule JSON objects, or `null` if EasyTier is not running.
-     */
-    fun buildRoutingRules(customCidrs: List<String> = emptyList()): List<JsonObject>? {
-        if (!running) return null
-
-        val cidrs = (DEFAULT_LAN_CIDRS + customCidrs).distinct()
-        val rule = JsonObject()
-        rule.addProperty("type", "field")
-        rule.add("ip", Gson().toJsonTree(cidrs))
-        rule.addProperty("outboundTag", OUTBOUND_TAG)
-        return listOf(rule)
-    }
-
-    /**
-     * Get the list of mesh peer CIDRs discovered by EasyTier.
-     *
-     * This calls the EasyTier RPC to collect route information, extracting
-     * proxy_cidrs from all running instances.  The result can be used to
-     * build dynamic routing rules.
-     *
-     * @return List of CIDR strings (e.g. `["10.144.144.0/24"]`), or empty if unavailable.
-     */
-    fun getMeshCidrs(): List<String> {
-        if (!running) return emptyList()
-        return try {
-            val json = EasyTierJNI.collectNetworkInfos(10)
-            if (json.isNullOrBlank()) return emptyList()
-
-            // collectNetworkInfos returns NetworkInstanceRunningInfoMap:
-            // {"map": {"instance_name": {"running": true, "routes": [...], ...}}}
-            val cidrs = mutableSetOf<String>()
-            val parsed = JsonParser.parseString(json)
-            if (parsed.isJsonObject) {
-                val mapObj = parsed.asJsonObject.getAsJsonObject("map")
-                    ?: parsed.asJsonObject
-                for ((_, info) in mapObj.entrySet()) {
-                    val obj = info.asJsonObject
-                    // routes is an array of route objects, each may have proxy_cidrs
-                    val routes = obj.getAsJsonArray("routes") ?: continue
-                    for (route in routes) {
-                        val routeObj = route.asJsonObject
-                        // proxy_cidrs may be in the route object
-                        val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
-                        if (proxyCidrs != null) {
-                            for (cidr in proxyCidrs) {
-                                cidrs.add(cidr.asString)
-                            }
-                        }
-                        // Also check direct_cidrs and other CIDR fields
-                        val directCidrs = routeObj.getAsJsonArray("direct_cidrs")
-                        if (directCidrs != null) {
-                            for (cidr in directCidrs) {
-                                cidrs.add(cidr.asString)
-                            }
-                        }
-                    }
-                }
-            }
-            cidrs.toList()
-        } catch (e: Throwable) {
-            log("W", "Failed to get mesh CIDRs", e)
-            emptyList()
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Internal helpers
-    // ------------------------------------------------------------------
-
-    /**
-     * Get the raw network info JSON from EasyTier for debugging or UI display.
-     */
-    fun getNetworkInfoJson(): String? {
-        if (!running) return null
-        return try {
-            EasyTierJNI.collectNetworkInfos(50)
-        } catch (e: Throwable) {
-            null
+            false
         }
     }
 }
-
-/** SOCKS5 endpoint for the EasyTier listener. */
-data class Socks5Endpoint(
-    val host: String,
-    val port: Int
-)
