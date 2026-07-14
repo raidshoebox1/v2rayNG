@@ -28,15 +28,21 @@ import java.util.Locale
  * selection change (Switch/Spinner).  Diagnostic buttons at the bottom
  * allow starting/stopping EasyTier and viewing logs/network info.
  *
- * Locale is provided by the launching app via the [EXTRA_LOCALE] intent
- * extra so the plugin (which cannot access v2rayNG's SettingsManager)
- * still respects the user's language choice.
+ * Locale is provided by the launching app via [localeOverride] so the
+ * plugin (which cannot access v2rayNG's SettingsManager) still respects
+ * the user's language choice.
  */
 class EasyTierSettingsActivity : AppCompatActivity() {
 
     companion object {
-        /** Optional BCP-47 language tag (e.g. "zh-CN", "vi") passed by the launcher. */
-        const val EXTRA_LOCALE = "easytier_locale"
+        /**
+         * Set by the launcher before starting this activity so that
+         * [attachBaseContext] can wrap the locale.  Cleared after use
+         * to avoid leakage between launches.
+         * Format: BCP-47 language tag, e.g. "zh-CN", "vi", "ru".
+         */
+        @Volatile
+        var localeOverride: String? = null
     }
 
     private lateinit var swEnable: SwitchCompat
@@ -54,7 +60,8 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     private var isLoading = false
 
     override fun attachBaseContext(newBase: Context) {
-        val tag = newBase.getStringExtra(EXTRA_LOCALE)
+        val tag = localeOverride
+        localeOverride = null  // consume to avoid leakage
         if (!tag.isNullOrBlank()) {
             val locale = Locale.forLanguageTag(tag)
             val config = Configuration(newBase.resources.configuration)
