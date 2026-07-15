@@ -36,4 +36,5 @@ dependencies {
     implementation(libs.preference.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+    implementation(libs.androidx.security.crypto)
 }

@@ -66,6 +66,7 @@
     <string name="easytier_invalid_virtual_ip">虚拟 IP 格式无效（应为 10.144.144.1 或 10.144.144.1/24）</string>
     <string name="easytier_invalid_peer">无效的对端地址：%1$s</string>
     <string name="easytier_invalid_port">端口必须在 1 到 65535 之间</string>
+    <string name="easytier_already_running">EasyTier 已随 VPN 运行，请先停止 VPN。</string>
 
     <!-- Log dialog -->
     <string name="easytier_logs_empty">暂无日志。启动 v2rayNG VPN 后将开始记录。</string>
