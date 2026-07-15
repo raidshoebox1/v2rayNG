@@ -1287,12 +1287,14 @@ object CoreConfigManager {
         v2rayConfig.outbounds.add(socks5Outbound)
         LogUtil.i(AppConfig.TAG, "EasyTier: injected SOCKS5 outbound on 127.0.0.1:${etConfig.socks5Port}")
 
-        // Build routing rules: only inject mesh CIDRs discovered by EasyTier.
-        // We do NOT inject DEFAULT_LAN_CIDRs unconditionally — that would blackhole
-        // real LAN devices (router, NAS) when no mesh peer owns those ranges.
-        val lanCidrs = ArrayList<String>()
+        // Build routing rules: DEFAULT_LAN_CIDRs as baseline + mesh CIDRs from EasyTier.
+        // DEFAULT_LAN_CIDRs covers the common private ranges used by EasyTier virtual
+        // networks (10.x, 172.16-31.x, 192.168.x).  This ensures traffic to the virtual
+        // LAN is routed through EasyTier even when mesh CIDR discovery returns empty
+        // (e.g. peers not yet converged, or proxy_cidrs not configured).
+        val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
 
-        // Include any mesh CIDRs discovered by EasyTier (filtered for safety).
+        // Append any mesh CIDRs discovered by EasyTier (filtered for safety).
         // getMeshCidrsStatic() calls the static JNI directly (does not require a running
         // plugin instance), but only returns meaningful results when EasyTier is running.
         try {
@@ -1303,11 +1305,6 @@ object CoreConfigManager {
             }
         } catch (e: Throwable) {
             LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs (non-fatal)", e)
-        }
-
-        if (lanCidrs.isEmpty()) {
-            LogUtil.d(AppConfig.TAG, "EasyTier: no mesh CIDRs to inject (EasyTier not running or no peers yet)")
-            return
         }
 
         val easyTierRule = V2rayConfig.RoutingBean.RulesBean(
@@ -1369,8 +1366,9 @@ object CoreConfigManager {
             val rules = routing.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
                 ?: JsonArray().also { routing.add("rules", it) }
 
-            val lanCidrs = ArrayList<String>()
-            // Include any mesh CIDRs discovered by EasyTier (filtered for safety).
+            // Build routing rule: DEFAULT_LAN_CIDRs as baseline + mesh CIDRs from EasyTier.
+            val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
+            // Append any mesh CIDRs discovered by EasyTier (filtered for safety).
             try {
                 val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
                 if (meshCidrs.isNotEmpty()) {
@@ -1378,11 +1376,6 @@ object CoreConfigManager {
                 }
             } catch (e: Throwable) {
                 LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs for custom config (non-fatal)", e)
-            }
-
-            if (lanCidrs.isEmpty()) {
-                LogUtil.d(AppConfig.TAG, "EasyTier: no mesh CIDRs to inject into custom config")
-                return JsonUtil.toJsonPretty(obj) ?: json
             }
 
             val easyTierRule = com.google.gson.JsonObject().apply {

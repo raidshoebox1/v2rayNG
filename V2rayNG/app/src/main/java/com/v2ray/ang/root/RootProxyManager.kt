@@ -265,14 +265,14 @@ object RootProxyManager {
             // EasyTier mesh CIDRs must NOT be bypassed: re-mark them so they route into
             // the tun even though they fall inside the private ranges above. This is
             // only needed for IPv4 (EasyTier mesh uses v4 by default).
-            // Only inject mesh CIDRs actually advertised by EasyTier peers (validated
-            // by isSafeMeshCidr), NOT the broad DEFAULT_LAN_CIDRs.
+            // Inject DEFAULT_LAN_CIDRs unconditionally (covers common EasyTier virtual
+            // network ranges) plus any dynamically discovered mesh CIDRs.
             if (cmd == "iptables") {
                 try {
                     val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
                     if (etConfig != null && etConfig.enabled) {
-                        val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
-                            .filter { !it.contains(":") } // IPv4 only for iptables
+                        val meshCidrs = EasyTierPlugin.DEFAULT_LAN_CIDRS +
+                            EasyTierPlugin.getMeshCidrsStatic().filter { !it.contains(":") && it !in EasyTierPlugin.DEFAULT_LAN_CIDRS }
                         meshCidrs.forEach { cidr ->
                             appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
                         }
@@ -411,13 +411,13 @@ object RootProxyManager {
             appendLine("ip rule add iif $TUN goto 6000 pref 5020 2>/dev/null || true")
             // EasyTier mesh CIDRs must go through the tun (not direct via main table).
             // Add higher-priority rules for mesh CIDRs BEFORE the LAN-direct rules below.
-            // Only inject mesh CIDRs actually advertised by EasyTier peers (validated
-            // by isSafeMeshCidr), NOT the broad DEFAULT_LAN_CIDRs.
+            // Inject DEFAULT_LAN_CIDRs unconditionally (covers common EasyTier virtual
+            // network ranges) plus any dynamically discovered mesh CIDRs.
             try {
                 val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
                 if (etConfig != null && etConfig.enabled) {
-                    val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
-                        .filter { !it.contains(":") } // IPv4 only for ip rule
+                    val meshCidrs = EasyTierPlugin.DEFAULT_LAN_CIDRS +
+                        EasyTierPlugin.getMeshCidrsStatic().filter { !it.contains(":") && it !in EasyTierPlugin.DEFAULT_LAN_CIDRS }
                     meshCidrs.forEachIndexed { index, cidr ->
                         appendLine("ip rule add to $cidr lookup $TABLE pref $((5024 - index)) 2>/dev/null || true")
                     }
