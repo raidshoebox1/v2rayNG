@@ -1382,7 +1382,7 @@ object CoreConfigManager {
 
             if (lanCidrs.isEmpty()) {
                 LogUtil.d(AppConfig.TAG, "EasyTier: no mesh CIDRs to inject into custom config")
-                return@try JsonUtil.toJsonPretty(obj) ?: json
+                return JsonUtil.toJsonPretty(obj) ?: json
             }
 
             val easyTierRule = com.google.gson.JsonObject().apply {
