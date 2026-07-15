@@ -368,7 +368,7 @@ object CoreServiceManager {
             // a conflict (both would call runNetworkInstance with the same name).
             EasyTierPlugin.stopTest()
             // Do NOT log peers (may contain sensitive URIs with credentials) or network secret.
-            EasyTierPlugin.log("I", "EasyTier: starting plugin (network=${etConfig.networkName}, socks5=${etConfig.socks5Port}, peers=${etConfig.peers.size} peer(s))")
+            EasyTierPlugin.log("I", "EasyTier: starting plugin (network=${etConfig.networkName}, hostname=${etConfig.hostname}, socks5=${etConfig.socks5Port}, peers=${etConfig.peers.size} peer(s))")
             val plugin = EasyTierPlugin(context)
             val started = plugin.start(etConfig)
             if (started) {

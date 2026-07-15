@@ -6,6 +6,9 @@ import android.util.Log
 import androidx.preference.PreferenceManager
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import java.io.File
 
 /**
  * Settings manager for EasyTier plugin configuration.
@@ -20,6 +23,17 @@ import androidx.security.crypto.MasterKey
  * the plain XML of the default SharedPreferences.  On first read after
  * upgrade, the secret is migrated from plaintext to the encrypted store.
  *
+ * **Cross-process snapshot file:**
+ * The v2rayNG VPN services (CoreVpnService, CoreProxyOnlyService,
+ * CoreRootService) run in a separate process (`:RunSoLibV2RayDaemon`).
+ * Android's SharedPreferences is NOT multi-process safe — the service
+ * process would see stale cached values after the user changes settings
+ * in the main process (EasyTierSettingsActivity).  To fix this, every
+ * setter also writes a JSON snapshot of all settings to a file in the
+ * app's private files directory.  [getEasyTierConfig] reads from this
+ * file (always fresh from disk) instead of SharedPreferences, so the
+ * service process always sees the latest values.
+ *
  * v2rayNG's SettingsManager can call [EasyTierSettingsManager.getEasyTierConfig]
  * to get a ready-to-use [EasyTierConfig] instance.
  */
@@ -29,6 +43,7 @@ object EasyTierSettingsManager {
     private const val PREFIX = "easytier_"
     private const val SECRET_FILE = "easytier_secret"
     private const val MIGRATED_FLAG = "easytier_secret_migrated"
+    private const val SNAPSHOT_FILE = "easytier_config.json"
 
     // Keys
     const val KEY_ENABLED = PREFIX + "enabled"
@@ -48,6 +63,69 @@ object EasyTierSettingsManager {
 
     private fun prefs(context: Context): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
+
+    // ------------------------------------------------------------------
+    // Cross-process snapshot file
+    // ------------------------------------------------------------------
+
+    /**
+     * The snapshot file lives in the app's private files directory, which
+     * is shared across all processes of the app.  Writes are atomic
+     * (write to temp file, then rename) to avoid corruption.
+     */
+    private fun snapshotFile(context: Context): File =
+        File(context.applicationContext.filesDir, SNAPSHOT_FILE)
+
+    /**
+     * Write a JSON snapshot of all settings to the snapshot file.
+     * Called by every setter so the service process always sees the
+     * latest values when it reads from the file.
+     */
+    private fun writeSnapshot(context: Context) {
+        try {
+            val sp = prefs(context)
+            val json = JsonObject().apply {
+                addProperty(KEY_ENABLED, sp.getBoolean(KEY_ENABLED, false))
+                addProperty(KEY_HOSTNAME, sp.getString(KEY_HOSTNAME, null) ?: "")
+                addProperty(KEY_NETWORK_NAME, sp.getString(KEY_NETWORK_NAME, "") ?: "")
+                addProperty(KEY_VIRTUAL_IP, sp.getString(KEY_VIRTUAL_IP, null) ?: "")
+                addProperty(KEY_PEERS, sp.getString(KEY_PEERS, "") ?: "")
+                addProperty(KEY_SOCKS5_PORT, sp.getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString()) ?: DEFAULT_SOCKS5_PORT.toString())
+                addProperty(KEY_LOG_ENABLED, sp.getBoolean(KEY_LOG_ENABLED, true))
+                addProperty(KEY_MTU, sp.getString(KEY_MTU, null) ?: "")
+                addProperty(KEY_LOG_LEVEL, sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
+            }
+            // Network secret from EncryptedSharedPreferences
+            json.addProperty(KEY_NETWORK_SECRET, secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: "")
+            val file = snapshotFile(context)
+            val tmp = File(file.parentFile, "$SNAPSHOT_FILE.tmp")
+            tmp.writeText(json.toString())
+            tmp.renameTo(file)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to write config snapshot", e)
+        }
+    }
+
+    /**
+     * Read the JSON snapshot from disk.  Returns null if the file does
+     * not exist (e.g. first run before any setter has been called) or
+     * cannot be parsed.  The caller falls back to SharedPreferences in
+     * that case.
+     */
+    private fun readSnapshot(context: Context): JsonObject? {
+        return try {
+            val file = snapshotFile(context)
+            if (!file.exists()) return null
+            JsonParser.parseString(file.readText()).asJsonObject
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to read config snapshot", e)
+            null
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Encrypted SharedPreferences for network secret
+    // ------------------------------------------------------------------
 
     /**
      * Lazily-created encrypted SharedPreferences for the network secret.
@@ -109,89 +187,129 @@ object EasyTierSettingsManager {
     }
 
     // ------------------------------------------------------------------
-    // Getters
+    // Getters — read from snapshot file (cross-process safe), fall back to SharedPreferences
     // ------------------------------------------------------------------
 
-    fun isEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_ENABLED, false)
-
-    fun getHostname(context: Context): String? =
-        prefs(context).getString(KEY_HOSTNAME, null)?.takeIf { it.isNotBlank() }
-
-    fun getNetworkName(context: Context): String =
-        prefs(context).getString(KEY_NETWORK_NAME, "") ?: ""
-
-    fun getNetworkSecret(context: Context): String =
-        secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: ""
-
-    fun getVirtualIp(context: Context): String? =
-        prefs(context).getString(KEY_VIRTUAL_IP, null)?.takeIf { it.isNotBlank() }
-
-    fun getPeers(context: Context): List<String> =
-        prefs(context).getString(KEY_PEERS, "")
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?: emptyList()
-
-    fun getSocks5Port(context: Context): Int {
-        val stored = prefs(context).getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString())?.toIntOrNull()
-        return if (stored != null && stored in 1..65535) stored else DEFAULT_SOCKS5_PORT
+    fun isEnabled(context: Context): Boolean {
+        val snap = readSnapshot(context)
+        return snap?.get(KEY_ENABLED)?.asBoolean ?: prefs(context).getBoolean(KEY_ENABLED, false)
     }
 
-    fun isLogEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_LOG_ENABLED, true)
+    fun getHostname(context: Context): String? {
+        val snap = readSnapshot(context)
+        val v = snap?.get(KEY_HOSTNAME)?.asString ?: prefs(context).getString(KEY_HOSTNAME, null)
+        return v?.takeIf { it.isNotBlank() }
+    }
 
-    fun getMtu(context: Context): Int? =
-        prefs(context).getString(KEY_MTU, null)?.toIntOrNull()
+    fun getNetworkName(context: Context): String {
+        val snap = readSnapshot(context)
+        return snap?.get(KEY_NETWORK_NAME)?.asString ?: (prefs(context).getString(KEY_NETWORK_NAME, "") ?: "")
+    }
 
-    fun getLogLevel(context: Context): String =
-        prefs(context).getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL
+    fun getNetworkSecret(context: Context): String {
+        val snap = readSnapshot(context)
+        return snap?.get(KEY_NETWORK_SECRET)?.asString ?: (secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: "")
+    }
+
+    fun getVirtualIp(context: Context): String? {
+        val snap = readSnapshot(context)
+        val v = snap?.get(KEY_VIRTUAL_IP)?.asString ?: prefs(context).getString(KEY_VIRTUAL_IP, null)
+        return v?.takeIf { it.isNotBlank() }
+    }
+
+    fun getPeers(context: Context): List<String> {
+        val snap = readSnapshot(context)
+        val raw = snap?.get(KEY_PEERS)?.asString ?: prefs(context).getString(KEY_PEERS, "")
+        return raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+    }
+
+    fun getSocks5Port(context: Context): Int {
+        val snap = readSnapshot(context)
+        val stored = snap?.get(KEY_SOCKS5_PORT)?.asString ?: (prefs(context).getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString()) ?: DEFAULT_SOCKS5_PORT.toString())
+        val port = stored.toIntOrNull()
+        return if (port != null && port in 1..65535) port else DEFAULT_SOCKS5_PORT
+    }
+
+    fun isLogEnabled(context: Context): Boolean {
+        val snap = readSnapshot(context)
+        return snap?.get(KEY_LOG_ENABLED)?.asBoolean ?: prefs(context).getBoolean(KEY_LOG_ENABLED, true)
+    }
+
+    fun getMtu(context: Context): Int? {
+        val snap = readSnapshot(context)
+        val v = snap?.get(KEY_MTU)?.asString ?: prefs(context).getString(KEY_MTU, null)
+        return v?.toIntOrNull()
+    }
+
+    fun getLogLevel(context: Context): String {
+        val snap = readSnapshot(context)
+        return snap?.get(KEY_LOG_LEVEL)?.asString ?: (prefs(context).getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
+    }
 
     // ------------------------------------------------------------------
-    // Setters
+    // Setters — write to SharedPreferences AND snapshot file
     // ------------------------------------------------------------------
 
     fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        writeSnapshot(context)
     }
 
     fun setHostname(context: Context, hostname: String?) {
         prefs(context).edit().putString(KEY_HOSTNAME, hostname).apply()
+        writeSnapshot(context)
     }
 
     fun setNetworkName(context: Context, name: String) {
         prefs(context).edit().putString(KEY_NETWORK_NAME, name).apply()
+        writeSnapshot(context)
     }
 
     fun setNetworkSecret(context: Context, secret: String) {
         secretPrefs(context).edit().putString(KEY_NETWORK_SECRET, secret).apply()
+        writeSnapshot(context)
     }
 
     fun setVirtualIp(context: Context, ip: String?) {
         prefs(context).edit().putString(KEY_VIRTUAL_IP, ip).apply()
+        writeSnapshot(context)
     }
 
     fun setPeers(context: Context, peers: List<String>) {
         prefs(context).edit().putString(KEY_PEERS, peers.joinToString(",")).apply()
+        writeSnapshot(context)
     }
 
     fun setSocks5Port(context: Context, port: Int) {
         if (port in 1..65535) {
             prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).apply()
+            writeSnapshot(context)
         }
     }
 
     fun setLogEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_LOG_ENABLED, enabled).apply()
+        writeSnapshot(context)
     }
 
     fun setMtu(context: Context, mtu: Int?) {
         prefs(context).edit().putString(KEY_MTU, mtu?.toString()).apply()
+        writeSnapshot(context)
     }
 
     fun setLogLevel(context: Context, level: String) {
         prefs(context).edit().putString(KEY_LOG_LEVEL, level).apply()
+        writeSnapshot(context)
+    }
+
+    /**
+     * Force-write a snapshot from the current SharedPreferences state.
+     * Called from [EasyTierSettingsActivity.onPause] as a safety net
+     * to ensure the snapshot file is up-to-date even if an individual
+     * setter was missed.
+     */
+    fun flushSnapshot(context: Context) {
+        writeSnapshot(context)
     }
 
     // ------------------------------------------------------------------
@@ -201,23 +319,45 @@ object EasyTierSettingsManager {
     /**
      * Build an [EasyTierConfig] from stored settings.
      * Returns `null` if EasyTier is disabled or network name is empty.
+     *
+     * Reads from the cross-process snapshot file (always fresh from disk)
+     * so that the VPN service process (`:RunSoLibV2RayDaemon`) sees the
+     * latest values written by the settings activity in the main process.
+     * The snapshot is read exactly once to avoid inconsistency if the file
+     * is being written concurrently.
      */
     fun getEasyTierConfig(context: Context): EasyTierConfig? {
-        if (!isEnabled(context)) return null
-        val networkName = getNetworkName(context)
+        val snap = readSnapshot(context)
+        val sp = prefs(context)
+
+        val enabled = snap?.get(KEY_ENABLED)?.asBoolean ?: sp.getBoolean(KEY_ENABLED, false)
+        if (!enabled) return null
+
+        val networkName = snap?.get(KEY_NETWORK_NAME)?.asString ?: (sp.getString(KEY_NETWORK_NAME, "") ?: "")
         if (networkName.isBlank()) return null
+
+        val hostname = (snap?.get(KEY_HOSTNAME)?.asString ?: sp.getString(KEY_HOSTNAME, null))?.takeIf { it.isNotBlank() }
+        val networkSecret = snap?.get(KEY_NETWORK_SECRET)?.asString ?: (secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: "")
+        val virtualIp = (snap?.get(KEY_VIRTUAL_IP)?.asString ?: sp.getString(KEY_VIRTUAL_IP, null))?.takeIf { it.isNotBlank() }
+        val peersRaw = snap?.get(KEY_PEERS)?.asString ?: sp.getString(KEY_PEERS, "")
+        val peers = peersRaw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+        val socks5PortStr = snap?.get(KEY_SOCKS5_PORT)?.asString ?: (sp.getString(KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString()) ?: DEFAULT_SOCKS5_PORT.toString())
+        val socks5Port = socks5PortStr.toIntOrNull()?.takeIf { it in 1..65535 } ?: DEFAULT_SOCKS5_PORT
+        val mtu = (snap?.get(KEY_MTU)?.asString ?: sp.getString(KEY_MTU, null))?.toIntOrNull()
+        val logLevel = snap?.get(KEY_LOG_LEVEL)?.asString ?: (sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
 
         return EasyTierConfig(
             enabled = true,
             instanceName = EasyTierPlugin.DEFAULT_INSTANCE_NAME,
-            hostname = getHostname(context),
+            hostname = hostname,
             networkName = networkName,
-            networkSecret = getNetworkSecret(context),
-            virtualIp = getVirtualIp(context),
-            peers = getPeers(context),
-            socks5Port = getSocks5Port(context),
-            noTun = true, // always on for v2rayNG coexistence
-            mtu = getMtu(context),
-            logLevel = getLogLevel(context),
+            networkSecret = networkSecret,
+            virtualIp = virtualIp,
+            peers = peers,
+            socks5Port = socks5Port,
+            noTun = true,
+            mtu = mtu,
+            logLevel = logLevel,
         )
-    }}
+    }
+}
