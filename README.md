@@ -164,5 +164,6 @@ CI: `.github/workflows/build-easytier.yml` builds JNI + APK on push/PR. Use `bui
 ### Known limitations
 
 - `EasyTierDataPlaneJNI.kt` is reserved (unused) for future data-plane TCP/UDP APIs.
-- IPv6 mesh CIDRs are not yet routed in the VPN/Root bypass logic (EasyTier defaults to IPv4).
 - `getMeshCidrsStatic()` caches results for 5 seconds; topology changes may take up to 5s to propagate.
+- Mesh CIDRs are validated against a safelist (private ranges only) before injection — a malicious peer advertising `0.0.0.0/0` or public ranges will be rejected.
+- Network secret is stored in `EncryptedSharedPreferences` (AES-256-GCM) separate from the default plaintext prefs.
