@@ -31,7 +31,10 @@ class CoreProxyOnlyService : Service(), ServiceControl {
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LogUtil.i(AppConfig.TAG, "StartCore-Proxy: Service command received")
-        CoreServiceManager.startCoreLoop(null)
+        if (!CoreServiceManager.startCoreLoop(null)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
 

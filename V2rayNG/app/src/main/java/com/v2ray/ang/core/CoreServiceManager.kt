@@ -245,6 +245,14 @@ object CoreServiceManager {
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
 
+        // Stop any lingering EasyTier instance from a previous start that was
+        // not properly cleaned up (e.g. Proxy mode start failure, or stopCoreLoop
+        // not being called before this start). This ensures the native instance
+        // is stopped before starting with updated config, otherwise
+        // runNetworkInstance() would fail with "instance already exists" and the
+        // old instance (with stale settings) would keep running.
+        stopEasyTier()
+
         // Start EasyTier plugin BEFORE building the Xray config so that mesh CIDRs
         // are available for routing-rule injection.  After starting, poll briefly
         // for mesh CIDRs to give peers time to converge.
