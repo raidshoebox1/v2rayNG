@@ -6,6 +6,8 @@ import com.google.gson.JsonParser
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.LogCallback
 import com.easytier.plugin.BuildConfig
+import java.net.InetSocketAddress
+import java.net.Socket
 
 /**
  * EasyTier Plugin for v2rayNG
@@ -284,13 +286,15 @@ class EasyTierPlugin(private val context: Context) {
                             val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
                             if (proxyCidrs != null) {
                                 for (cidr in proxyCidrs) {
-                                    cidrs.add(cidr.asString)
+                                    val c = cidr.asString
+                                    if (isSafeMeshCidr(c)) cidrs.add(c)
                                 }
                             }
                             val directCidrs = routeObj.getAsJsonArray("direct_cidrs")
                             if (directCidrs != null) {
                                 for (cidr in directCidrs) {
-                                    cidrs.add(cidr.asString)
+                                    val c = cidr.asString
+                                    if (isSafeMeshCidr(c)) cidrs.add(c)
                                 }
                             }
                         }
@@ -299,6 +303,55 @@ class EasyTierPlugin(private val context: Context) {
                 cidrs.toList()
             } catch (e: Throwable) {
                 emptyList()
+            }
+        }
+
+        /**
+         * Validate a CIDR advertised by a mesh peer before injecting it into
+         * routing rules.  Rejects overly-broad prefixes (<= 7), public IP
+         * ranges, and anything that doesn't parse as a valid CIDR.
+         *
+         * Allowed ranges:
+         * - IPv4 private: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+         * - IPv4 link-local: 169.254.0.0/16
+         * - IPv4 CGNAT: 100.64.0.0/10
+         * - IPv6 ULA: fc00::/7
+         * - IPv6 link-local: fe80::/10
+         */
+        private fun isSafeMeshCidr(cidr: String): Boolean {
+            val parts = cidr.split("/")
+            if (parts.size != 2) return false
+            val ip = parts[0]
+            val prefix = parts[1].toIntOrNull() ?: return false
+
+            // Reject overly-broad prefixes
+            if (prefix < 0) return false
+            if (ip.contains(":")) {
+                // IPv6
+                if (prefix > 128) return false
+                if (prefix <= 7) return false  // reject ::/0 through ::/7
+                // Only allow ULA (fc00::/7) and link-local (fe80::/10)
+                val ipLower = ip.lowercase()
+                return ipLower.startsWith("fc") || ipLower.startsWith("fd") ||
+                       ipLower.startsWith("fe8") || ipLower.startsWith("fe9") ||
+                       ipLower.startsWith("fea") || ipLower.startsWith("feb")
+            } else {
+                // IPv4
+                if (prefix > 32) return false
+                if (prefix <= 7) return false  // reject 0.0.0.0/0 through /7
+                val octets = ip.split(".")
+                if (octets.size != 4) return false
+                val o = octets.map { it.toIntOrNull() ?: return false }
+                if (o.any { it !in 0..255 }) return false
+                // Only allow private / special-use ranges
+                return when {
+                    o[0] == 10 -> true                              // 10.0.0.0/8
+                    o[0] == 172 && o[1] in 16..31 -> true            // 172.16.0.0/12
+                    o[0] == 192 && o[1] == 168 -> true               // 192.168.0.0/16
+                    o[0] == 169 && o[1] == 254 -> true               // 169.254.0.0/16 (link-local)
+                    o[0] == 100 && o[1] in 64..127 -> true           // 100.64.0.0/10 (CGNAT)
+                    else -> false
+                }
             }
         }
 
@@ -331,6 +384,13 @@ class EasyTierPlugin(private val context: Context) {
          */
         @JvmStatic
         fun startTest(context: Context, config: EasyTierConfig): Boolean {
+            // Refuse to start a test instance if the VPN service already has one running.
+            // Both use the same instance name (DEFAULT_INSTANCE_NAME), so starting a second
+            // would conflict, and stopAllInstances() in stop() would kill the VPN instance.
+            if (isRunningStatic()) {
+                log("W", "EasyTier: cannot start test instance — VPN instance is already running")
+                return false
+            }
             // Stop any existing test instance first
             stopTest()
             log("I", "EasyTier: manual start from settings UI")
@@ -440,6 +500,12 @@ class EasyTierPlugin(private val context: Context) {
                 return false
             }
 
+            // Wait for the SOCKS5 listener to be ready so Xray-core doesn't
+            // fail its first connection attempt.  Best-effort: if the listener
+            // isn't ready after 2s we log a warning but still return true —
+            // EasyTier may still be initialising and the listener will appear shortly.
+            waitForSocks5(config.socks5Port)
+
             running = true
             currentConfig = config
             clearMeshCidrsCache()
@@ -475,6 +541,32 @@ class EasyTierPlugin(private val context: Context) {
             clearMeshCidrsCache()
             setStatus("stopped")
         }
+    }
+
+    /**
+     * Best-effort check that the SOCKS5 listener is accepting connections.
+     * Tries to connect to 127.0.0.1:[port] up to 5 times with 400ms delays.
+     * Logs a warning if the listener is not ready after all attempts but
+     * does NOT fail the start — EasyTier may still be initialising.
+     */
+    private fun waitForSocks5(port: Int) {
+        val maxAttempts = 5
+        val connectTimeoutMs = 200
+        val retryDelayMs = 400L
+        for (attempt in 1..maxAttempts) {
+            try {
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("127.0.0.1", port), connectTimeoutMs)
+                }
+                log("D", "EasyTier SOCKS5 listener ready on port $port (attempt $attempt)")
+                return
+            } catch (e: Throwable) {
+                if (attempt < maxAttempts) {
+                    Thread.sleep(retryDelayMs)
+                }
+            }
+        }
+        log("W", "EasyTier SOCKS5 listener on port $port not ready after $maxAttempts attempts (non-fatal — may still be initialising)")
     }
 
     /** Whether the EasyTier instance is currently running. */
