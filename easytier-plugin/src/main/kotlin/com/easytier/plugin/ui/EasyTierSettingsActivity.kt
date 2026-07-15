@@ -90,6 +90,12 @@ class EasyTierSettingsActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Ensure the cross-process snapshot file exists and is up-to-date.
+        // This is important after an app upgrade: the snapshot file may not
+        // exist yet, and the service process would fall back to stale
+        // SharedPreferences.  Calling flushSnapshot() here creates the file
+        // from the main process's fresh SharedPreferences.
+        EasyTierSettingsManager.flushSnapshot(applicationContext)
         refreshStatus()
     }
 
@@ -102,6 +108,9 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         saveAllFields()
+        // Safety net: ensure the cross-process snapshot file is up-to-date
+        // even if an individual setter missed writing it.
+        EasyTierSettingsManager.flushSnapshot(applicationContext)
     }
 
     override fun onSupportNavigateUp(): Boolean {
