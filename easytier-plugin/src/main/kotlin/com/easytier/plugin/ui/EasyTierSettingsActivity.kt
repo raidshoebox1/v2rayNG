@@ -298,6 +298,11 @@ class EasyTierSettingsActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.easytier_start_failed_disabled, Toast.LENGTH_LONG).show()
             return
         }
+        if (EasyTierPlugin.isRunningStatic()) {
+            EasyTierPlugin.log("W", "EasyTier: cannot start test instance — VPN instance is already running")
+            Toast.makeText(this, R.string.easytier_already_running, Toast.LENGTH_LONG).show()
+            return
+        }
         EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, hostname=${config.hostname}, peers=${config.peers.size} peer(s), socks5=${config.socks5Port})")
         val started = EasyTierPlugin.startTest(ctx, config)
         if (started) {

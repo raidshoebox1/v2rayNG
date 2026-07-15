@@ -88,8 +88,22 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
 
+      - name: Cache cargo-ndk
+        uses: actions/cache@v4
+        id: cache-cargo-ndk
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-v0.2.0
+
       - name: Install cargo-ndk
-        run: cargo install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --locked
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "EasyTier -> target"
+          key: ${{ matrix.arch }}-${{ hashFiles('EasyTier/**/Cargo.lock', 'EasyTier/**/Cargo.toml') }}
 
       - name: Install system dependencies (protoc)
         run: |
