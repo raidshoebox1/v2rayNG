@@ -2,7 +2,10 @@ package com.easytier.plugin
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.preference.PreferenceManager
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
 /**
  * Settings manager for EasyTier plugin configuration.
@@ -12,12 +15,20 @@ import androidx.preference.PreferenceManager
  * EasyTier settings separate from v2rayNG's MMKV storage, avoiding
  * any coupling to v2rayNG internals.
  *
+ * The network secret is stored in a separate [EncryptedSharedPreferences]
+ * file (`easytier_secret`) using AES-256-GCM, so it is not visible in
+ * the plain XML of the default SharedPreferences.  On first read after
+ * upgrade, the secret is migrated from plaintext to the encrypted store.
+ *
  * v2rayNG's SettingsManager can call [EasyTierSettingsManager.getEasyTierConfig]
  * to get a ready-to-use [EasyTierConfig] instance.
  */
 object EasyTierSettingsManager {
 
+    private const val TAG = "EasyTierSettings"
     private const val PREFIX = "easytier_"
+    private const val SECRET_FILE = "easytier_secret"
+    private const val MIGRATED_FLAG = "easytier_secret_migrated"
 
     // Keys
     const val KEY_ENABLED = PREFIX + "enabled"
@@ -38,6 +49,65 @@ object EasyTierSettingsManager {
     private fun prefs(context: Context): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
 
+    /**
+     * Lazily-created encrypted SharedPreferences for the network secret.
+     * Falls back to plaintext prefs if EncryptedSharedPreferences fails
+     * (e.g. on a corrupted keystore), so the app never crashes on read.
+     */
+    @Volatile
+    private var secretPrefs: SharedPreferences? = null
+    @Volatile
+    private var secretMigrationDone = false
+
+    private fun secretPrefs(context: Context): SharedPreferences {
+        secretPrefs?.let { return it }
+        return try {
+            val masterKey = MasterKey.Builder(context.applicationContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            val sp = EncryptedSharedPreferences.create(
+                context.applicationContext,
+                SECRET_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+            secretPrefs = sp
+            migrateSecretIfNeeded(context, sp)
+            sp
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to create EncryptedSharedPreferences, falling back to plaintext", e)
+            val fallback = prefs(context)
+            secretPrefs = fallback
+            fallback
+        }
+    }
+
+    /**
+     * One-time migration: move the network secret from plaintext default prefs
+     * to the encrypted store, then delete the plaintext copy.
+     */
+    private fun migrateSecretIfNeeded(context: Context, encrypted: SharedPreferences) {
+        if (secretMigrationDone) return
+        if (encrypted.getBoolean(MIGRATED_FLAG, false)) {
+            secretMigrationDone = true
+            return
+        }
+        try {
+            val plain = prefs(context)
+            val plainSecret = plain.getString(KEY_NETWORK_SECRET, null)
+            if (plainSecret != null && plainSecret.isNotEmpty()) {
+                encrypted.edit().putString(KEY_NETWORK_SECRET, plainSecret).apply()
+                plain.edit().remove(KEY_NETWORK_SECRET).apply()
+                Log.i(TAG, "Migrated network secret from plaintext to encrypted store")
+            }
+            encrypted.edit().putBoolean(MIGRATED_FLAG, true).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Network secret migration failed (non-fatal)", e)
+        }
+        secretMigrationDone = true
+    }
+
     // ------------------------------------------------------------------
     // Getters
     // ------------------------------------------------------------------
@@ -52,7 +122,7 @@ object EasyTierSettingsManager {
         prefs(context).getString(KEY_NETWORK_NAME, "") ?: ""
 
     fun getNetworkSecret(context: Context): String =
-        prefs(context).getString(KEY_NETWORK_SECRET, "") ?: ""
+        secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: ""
 
     fun getVirtualIp(context: Context): String? =
         prefs(context).getString(KEY_VIRTUAL_IP, null)?.takeIf { it.isNotBlank() }
@@ -95,7 +165,7 @@ object EasyTierSettingsManager {
     }
 
     fun setNetworkSecret(context: Context, secret: String) {
-        prefs(context).edit().putString(KEY_NETWORK_SECRET, secret).apply()
+        secretPrefs(context).edit().putString(KEY_NETWORK_SECRET, secret).apply()
     }
 
     fun setVirtualIp(context: Context, ip: String?) {

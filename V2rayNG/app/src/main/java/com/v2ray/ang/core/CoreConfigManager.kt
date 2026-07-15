@@ -1287,12 +1287,14 @@ object CoreConfigManager {
         v2rayConfig.outbounds.add(socks5Outbound)
         LogUtil.i(AppConfig.TAG, "EasyTier: injected SOCKS5 outbound on 127.0.0.1:${etConfig.socks5Port}")
 
-        // Build routing rules: LAN CIDRs → EasyTier
-        val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
+        // Build routing rules: only inject mesh CIDRs discovered by EasyTier.
+        // We do NOT inject DEFAULT_LAN_CIDRs unconditionally — that would blackhole
+        // real LAN devices (router, NAS) when no mesh peer owns those ranges.
+        val lanCidrs = ArrayList<String>()
 
-        // Also include any mesh CIDRs discovered by EasyTier.
-        // getMeshCidrs() calls the static JNI directly (does not require a running plugin instance),
-        // but only returns meaningful results when an EasyTier instance is actually running.
+        // Include any mesh CIDRs discovered by EasyTier (filtered for safety).
+        // getMeshCidrsStatic() calls the static JNI directly (does not require a running
+        // plugin instance), but only returns meaningful results when EasyTier is running.
         try {
             val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
             if (meshCidrs.isNotEmpty()) {
@@ -1303,14 +1305,22 @@ object CoreConfigManager {
             LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs (non-fatal)", e)
         }
 
+        if (lanCidrs.isEmpty()) {
+            LogUtil.d(AppConfig.TAG, "EasyTier: no mesh CIDRs to inject (EasyTier not running or no peers yet)")
+            return
+        }
+
         val easyTierRule = V2rayConfig.RoutingBean.RulesBean(
             type = "field",
             ip = lanCidrs,
             outboundTag = EasyTierPlugin.OUTBOUND_TAG
         )
-        // Prepend so it takes priority over the catch-all proxy rule
-        v2rayConfig.routing.rules.add(0, easyTierRule)
-        LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule for CIDRs: $lanCidrs")
+        // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority
+        // over the EasyTier CIDR rule.  If no dns-out rule exists, insert at index 0
+        // so EasyTier rules still take priority over the catch-all proxy rule.
+        val insertIndex = v2rayConfig.routing.rules.indexOfLast { it.outboundTag == "dns-out" } + 1
+        v2rayConfig.routing.rules.add(insertIndex, easyTierRule)
+        LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule at index $insertIndex for CIDRs: $lanCidrs")
     }
 
     /**
@@ -1359,8 +1369,8 @@ object CoreConfigManager {
             val rules = routing.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
                 ?: JsonArray().also { routing.add("rules", it) }
 
-            val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
-            // Also include any mesh CIDRs discovered by EasyTier.
+            val lanCidrs = ArrayList<String>()
+            // Include any mesh CIDRs discovered by EasyTier (filtered for safety).
             try {
                 val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
                 if (meshCidrs.isNotEmpty()) {
@@ -1369,17 +1379,40 @@ object CoreConfigManager {
             } catch (e: Throwable) {
                 LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs for custom config (non-fatal)", e)
             }
+
+            if (lanCidrs.isEmpty()) {
+                LogUtil.d(AppConfig.TAG, "EasyTier: no mesh CIDRs to inject into custom config")
+                return@try JsonUtil.toJsonPretty(obj) ?: json
+            }
+
             val easyTierRule = com.google.gson.JsonObject().apply {
                 addProperty("type", "field")
                 add("ip", Gson().toJsonTree(lanCidrs))
                 addProperty("outboundTag", EasyTierPlugin.OUTBOUND_TAG)
             }
-            // Prepend so it takes priority over the catch-all proxy rule.
-            // JsonArray's add(int, E) is shadowed by Gson's single-arg add() overloads
-            // in Kotlin, so rebuild the array with the easytier rule first.
+            // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority
+            // over the EasyTier CIDR rule.  If no dns-out rule exists, insert at index 0.
+            var dnsOutIndex = -1
+            for (i in 0 until rules.size()) {
+                val rule = rules[i]?.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+                if (rule.get("outboundTag")?.asString == "dns-out") {
+                    dnsOutIndex = i
+                }
+            }
             val newRules = com.google.gson.JsonArray()
-            newRules.add(easyTierRule)
-            rules.forEach { newRules.add(it) }
+            if (dnsOutIndex < 0) {
+                // No dns-out rule — insert EasyTier rule first
+                newRules.add(easyTierRule)
+                rules.forEach { newRules.add(it) }
+            } else {
+                // Insert after the last dns-out rule
+                for (i in 0 until rules.size()) {
+                    newRules.add(rules[i])
+                    if (i == dnsOutIndex) {
+                        newRules.add(easyTierRule)
+                    }
+                }
+            }
             routing.remove("rules")
             routing.add("rules", newRules)
 
