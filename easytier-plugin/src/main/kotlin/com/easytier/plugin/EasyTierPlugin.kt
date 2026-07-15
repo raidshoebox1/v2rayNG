@@ -465,6 +465,19 @@ class EasyTierPlugin(private val context: Context) {
         return try {
             setStatus("starting")
 
+            // Stop any stale native EasyTier instance from a previous lifecycle.
+            // If a previous start succeeded but stop() was never called (or the
+            // plugin object was orphaned without stop()), a native instance with
+            // the same name may still be running, causing runNetworkInstance()
+            // to fail with "instance already exists" and leaving the OLD config
+            // active. stopAllInstances() is a no-op if no instances are running.
+            try {
+                EasyTierJNI.stopAllInstances()
+            } catch (e: Throwable) {
+                log("W", "EasyTier: failed to stop stale instances before start", e)
+            }
+            clearMeshCidrsCache()
+
             // Register/deregister JNI log callback based on logEnabled setting
             val logEnabled = EasyTierSettingsManager.isLogEnabled(context)
             if (logEnabled) {
