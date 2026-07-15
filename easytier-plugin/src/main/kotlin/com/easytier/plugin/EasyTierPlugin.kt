@@ -280,21 +280,64 @@ class EasyTierPlugin(private val context: Context) {
                         ?: parsed.asJsonObject
                     for ((_, info) in mapObj.entrySet()) {
                         val obj = info.asJsonObject
-                        val routes = obj.getAsJsonArray("routes") ?: continue
-                        for (route in routes) {
-                            val routeObj = route.asJsonObject
-                            val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
-                            if (proxyCidrs != null) {
-                                for (cidr in proxyCidrs) {
-                                    val c = cidr.asString
-                                    if (isSafeMeshCidr(c)) cidrs.add(c)
+
+                        // 1. Extract the local node's virtual IP subnet from my_node_info.virtual_ipv4.
+                        //    This gives us the on-link subnet (e.g. 10.144.144.0/24) that EasyTier
+                        //    uses for its virtual network.  Without this, the mesh CIDR list would
+                        //    be empty when no peers advertise proxy_cidrs, and traffic to the
+                        //    virtual LAN would not be routed through EasyTier.
+                        val myNodeInfo = obj.getAsJsonObject("my_node_info")
+                        if (myNodeInfo != null) {
+                            val virtualIpv4 = myNodeInfo.getAsJsonObject("virtual_ipv4")
+                            if (virtualIpv4 != null) {
+                                val addr = virtualIpv4.get("address")?.asString
+                                val networkLength = virtualIpv4.get("network_length")?.asInt
+                                if (addr != null && networkLength != null) {
+                                    val cidr = "$addr/$networkLength"
+                                    if (isSafeMeshCidr(cidr)) cidrs.add(cidr)
                                 }
                             }
-                            val directCidrs = routeObj.getAsJsonArray("direct_cidrs")
-                            if (directCidrs != null) {
-                                for (cidr in directCidrs) {
-                                    val c = cidr.asString
-                                    if (isSafeMeshCidr(c)) cidrs.add(c)
+                        }
+
+                        // 2. Extract each remote peer's virtual IP from route entries (ipv4_addr).
+                        //    Each route entry has an ipv4_addr with the peer's virtual IP and the
+                        //    network's subnet mask (typically /24).  We add the full CIDR so that
+                        //    all peers in the same subnet are routable.
+                        val routes = obj.getAsJsonArray("routes")
+                        if (routes != null) {
+                            for (route in routes) {
+                                val routeObj = route.asJsonObject
+
+                                // Peer's virtual IP address (Ipv4Inet: { address, network_length })
+                                val ipv4Addr = routeObj.getAsJsonObject("ipv4_addr")
+                                if (ipv4Addr != null) {
+                                    val addr = ipv4Addr.get("address")?.asString
+                                    val networkLength = ipv4Addr.get("network_length")?.asInt
+                                    if (addr != null && networkLength != null) {
+                                        val cidr = "$addr/$networkLength"
+                                        if (isSafeMeshCidr(cidr)) cidrs.add(cidr)
+                                    }
+                                }
+
+                                // IPv6 virtual address (Ipv6Inet: { address, network_length })
+                                val ipv6Addr = routeObj.getAsJsonObject("ipv6_addr")
+                                if (ipv6Addr != null) {
+                                    val addr = ipv6Addr.get("address")?.asString
+                                    val networkLength = ipv6Addr.get("network_length")?.asInt
+                                    if (addr != null && networkLength != null) {
+                                        val cidr = "$addr/$networkLength"
+                                        if (isSafeMeshCidr(cidr)) cidrs.add(cidr)
+                                    }
+                                }
+
+                                // proxy_cidrs: additional subnet ranges the peer proxies
+                                // (e.g. a LAN behind the peer, or a VPN portal client network).
+                                val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
+                                if (proxyCidrs != null) {
+                                    for (cidr in proxyCidrs) {
+                                        val c = cidr.asString
+                                        if (isSafeMeshCidr(c)) cidrs.add(c)
+                                    }
                                 }
                             }
                         }
