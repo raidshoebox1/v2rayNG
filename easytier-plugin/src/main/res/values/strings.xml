@@ -64,6 +64,7 @@
     <string name="easytier_invalid_virtual_ip">Invalid virtual IP (expected: 10.144.144.1 or 10.144.144.1/24)</string>
     <string name="easytier_invalid_peer">Invalid peer URI: %1$s</string>
     <string name="easytier_invalid_port">Port must be between 1 and 65535</string>
+    <string name="easytier_already_running">EasyTier is already running with the VPN. Stop the VPN first.</string>
 
     <!-- Log dialog -->
     <string name="easytier_logs_empty">No log entries yet. Start v2rayNG VPN to begin.</string>

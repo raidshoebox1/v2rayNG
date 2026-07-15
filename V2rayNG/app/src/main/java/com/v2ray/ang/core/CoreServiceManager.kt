@@ -244,6 +244,13 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+
+        // Start EasyTier plugin BEFORE building the Xray config so that mesh CIDRs
+        // are available for routing-rule injection.  After starting, poll briefly
+        // for mesh CIDRs to give peers time to converge.
+        startEasyTier(service)
+        pollMeshCidrs()
+
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
@@ -269,9 +276,6 @@ object CoreServiceManager {
 
         NotificationManager.showNotification(currentConfig)
         CoreNativeManager.reconcileBrowserDialer(dialerAddr)
-
-        // Start EasyTier plugin before Xray-core so the SOCKS5 endpoint is ready
-        startEasyTier(service)
 
         coreController.startLoop(result.content, tunFd)
 
@@ -384,6 +388,34 @@ object CoreServiceManager {
             }
         }
         easyTierPlugin = null
+    }
+
+    /**
+     * Poll EasyTier for mesh CIDRs shortly after starting, so that the Xray
+     * config built in [doStartCoreLoop] has the correct routing rules on the
+     * first boot rather than requiring a VPN restart.
+     *
+     * Performs up to 3 polls with 500ms delays (max ~1.5s total).  This is
+     * best-effort: if no peers have converged yet, the config is built with
+     * whatever CIDRs are available (possibly none), and a subsequent VPN
+     * restart will pick them up.
+     */
+    private fun pollMeshCidrs() {
+        if (easyTierPlugin == null) return  // EasyTier not enabled or failed to start
+        try {
+            for (attempt in 1..3) {
+                EasyTierPlugin.clearMeshCidrsCache()
+                val cidrs = EasyTierPlugin.getMeshCidrsStatic()
+                if (cidrs.isNotEmpty()) {
+                    EasyTierPlugin.log("I", "EasyTier: mesh CIDRs available after $attempt poll(s): $cidrs")
+                    return
+                }
+                if (attempt < 3) Thread.sleep(500)
+            }
+            EasyTierPlugin.log("D", "EasyTier: no mesh CIDRs after 3 polls (peers may not have converged yet)")
+        } catch (e: Throwable) {
+            EasyTierPlugin.log("W", "EasyTier: mesh CIDR poll failed (non-fatal)", e)
+        }
     }
 
     //endregion
