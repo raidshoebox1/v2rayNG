@@ -52,6 +52,16 @@ object CoreServiceManager {
     private var browserDialer: IDialerService? = null
     private var easyTierPlugin: EasyTierPlugin? = null
 
+    /**
+     * Background thread that periodically writes the EasyTier status
+     * snapshot to a file so the Settings UI (main process) can display
+     * live status.  Only running while the VPN EasyTier instance is active.
+     */
+    @Volatile
+    private var statusWriterThread: Thread? = null
+    @Volatile
+    private var statusWriterRunning: Boolean = false
+
     var serviceControl: SoftReference<ServiceControl>? = null
         set(value) {
             field = value
@@ -251,7 +261,7 @@ object CoreServiceManager {
         // is stopped before starting with updated config, otherwise
         // runNetworkInstance() would fail with "instance already exists" and the
         // old instance (with stale settings) would keep running.
-        stopEasyTier()
+        stopEasyTier(service)
 
         // Start EasyTier plugin BEFORE building the Xray config so that mesh CIDRs
         // are available for routing-rule injection.  After starting, poll briefly
@@ -317,7 +327,7 @@ object CoreServiceManager {
         val service = getService() ?: return false
 
         // Stop EasyTier plugin after Xray-core stops
-        stopEasyTier()
+        stopEasyTier(service)
 
         if (coreController.isRunning) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -374,6 +384,8 @@ object CoreServiceManager {
             if (started) {
                 easyTierPlugin = plugin
                 EasyTierPlugin.log("I", "EasyTier: plugin started successfully (network=${etConfig.networkName}, socks5=${etConfig.socks5Port})")
+                // Start the status writer so the Settings UI can display live status
+                startStatusWriter(context)
             } else {
                 EasyTierPlugin.log("E", "EasyTier: plugin failed to start (status=${EasyTierPlugin.getStatus()}, error=${EasyTierPlugin.getLastError()})")
             }
@@ -386,7 +398,8 @@ object CoreServiceManager {
     /**
      * Stop the EasyTier mesh-network plugin.
      */
-    private fun stopEasyTier() {
+    private fun stopEasyTier(context: Context) {
+        stopStatusWriter()
         easyTierPlugin?.let { plugin ->
             try {
                 plugin.stop()
@@ -396,6 +409,55 @@ object CoreServiceManager {
             }
         }
         easyTierPlugin = null
+        // Delete the status snapshot so the UI doesn't show stale "running" state
+        EasyTierPlugin.deleteStatusSnapshot(context)
+    }
+
+    /**
+     * Start a background daemon thread that periodically writes the EasyTier
+     * status snapshot to a file.  The Settings UI (running in the main process)
+     * reads this file to display live peer status, since JNI state is
+     * process-local and cannot be shared across processes.
+     */
+    private fun startStatusWriter(context: Context) {
+        stopStatusWriter()
+        statusWriterRunning = true
+        val appContext = context.applicationContext
+        statusWriterThread = Thread {
+            while (statusWriterRunning) {
+                try {
+                    EasyTierPlugin.writeStatusSnapshot(appContext)
+                } catch (e: Throwable) {
+                    EasyTierPlugin.log("W", "EasyTier: status writer failed (non-fatal)", e)
+                }
+                try {
+                    Thread.sleep(3000)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+        }.apply {
+            name = "EasyTierStatusWriter"
+            isDaemon = true
+            start()
+        }
+    }
+
+    /**
+     * Stop the status writer thread.
+     */
+    private fun stopStatusWriter() {
+        statusWriterRunning = false
+        statusWriterThread?.let { thread ->
+            thread.interrupt()
+            try {
+                thread.join(1000)
+            } catch (e: InterruptedException) {
+                // ignore
+            }
+        }
+        statusWriterThread = null
     }
 
     /**

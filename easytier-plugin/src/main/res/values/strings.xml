@@ -38,7 +38,6 @@
     <!-- Log -->
     <string name="easytier_pref_log_enabled_title">Enable Logging</string>
     <string name="easytier_pref_log_enabled_summary">Capture EasyTier logs for in-app display</string>
-    <string name="easytier_pref_log_level_title">Log Level</string>
 
     <!-- Status -->
     <string name="easytier_pref_status_title">Status</string>
@@ -53,7 +52,7 @@
 
     <!-- Diagnostics buttons -->
     <string name="easytier_pref_start_now_title">Test Connection</string>
-    <string name="easytier_pref_stop_now_title">Stop EasyTier</string>
+    <string name="easytier_test_stop_title">Stop Test</string>
     <string name="easytier_pref_view_logs_title">View Logs</string>
     <string name="easytier_pref_clear_logs_title">Clear Logs</string>
     <string name="easytier_pref_network_info_title">Network Info (Advanced)</string>
@@ -71,9 +70,7 @@
     <string name="easytier_logs_cleared">Logs cleared</string>
     <string name="easytier_test_connected">Connected: %1$d peers, %2$d mesh CIDRs</string>
     <string name="easytier_test_no_peers">No peers found within 10s. Check peers and network name.</string>
-    <string name="easytier_test_stopped">Test instance stopped</string>
     <string name="easytier_test_vpn_running">VPN is running EasyTier. Status shown above.</string>
-    <string name="easytier_stop_vpn_hint">Stop v2rayNG VPN to stop EasyTier.</string>
 
     <!-- Validation errors -->
     <string name="easytier_invalid_virtual_ip">Invalid virtual IP (expected: 10.144.144.1 or 10.144.144.1/24)</string>
