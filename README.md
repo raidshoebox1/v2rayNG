@@ -93,11 +93,7 @@ Telegram Channel / Telegram 频道：
 
 ## EasyTier Mesh VPN Plugin
 
-This fork adds an **EasyTier** mesh-network plugin to v2rayNG, letting you access remote LAN/mesh hosts through EasyTier's P2P/relay network while using v2rayNG for internet proxy.
-
-### Architecture
-
-EasyTier runs in **no-tun + SOCKS5** mode (loopback only) inside the v2rayNG process. It does **not** compete for the Android VpnService slot. Xray-core routes LAN/mesh CIDRs to the EasyTier SOCKS5 outbound via an injected routing rule.
+EasyTier runs in **no-tun + SOCKS5** mode (loopback only) inside the v2rayNG process; it does **not** compete for the Android VpnService slot. Xray-core routes LAN/mesh CIDRs to the EasyTier SOCKS5 outbound via an injected routing rule. No-TUN mode is mandatory because EasyTier's own TUN would conflict with v2rayNG's VpnService.
 
 ```
 App traffic → VpnService → Xray-core routing
@@ -105,28 +101,14 @@ App traffic → VpnService → Xray-core routing
   └─ LAN/mesh CIDRs  → easytier outbound (SOCKS5 127.0.0.1:10852) → EasyTier mesh
 ```
 
-### Configuration
+Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); topology changes may take up to 5 s to propagate into routing rules.
 
-In v2rayNG Settings → **EasyTier Mesh VPN** → **EasyTier Settings**:
-
-| Setting | Required | Default | Description |
-|---------|----------|---------|-------------|
-| Enable | Yes | OFF | Master switch |
-| Network Name | Yes | (empty) | Must match across all peers |
-| Network Secret | Recommended | (empty) | Shared secret for mesh encryption |
-| Virtual IP | No | (auto) | e.g. `10.144.144.1`; leave empty for auto-assign |
-| Peers | Yes | (empty) | One per line; e.g. `tcp://public.easytier.top:11010` |
-| SOCKS5 Port | No | 10852 | Loopback only; must not conflict with v2rayNG's SOCKS (10808) |
-| Log Enabled | No | ON | Capture EasyTier logs for in-app viewer |
-| Log Level | No | warn | error/warn/info/debug/trace |
-
-### Security notes
+### Security
 
 - **SOCKS5 binds to `127.0.0.1` only** — the EasyTier SOCKS5 listener is not exposed to other devices on the LAN.
-- **Network secret is stored in plaintext** in SharedPreferences (same security model as v2rayNG's own settings). Consider Android Keystore encryption for future enhancement.
-- **Debug logs are suppressed in release builds** — only W/E levels go to logcat; the in-app log viewer still shows all levels.
-- **EasyTier submodule** points to a fork (`raidshoebox1/EasyTier`) for JNI log-callback support. Audit the fork diff before building release APKs.
-- **No-TUN mode is mandatory** — EasyTier's TUN mode would conflict with v2rayNG's VpnService.
+- **Network secret** is stored in `EncryptedSharedPreferences` (AES-256-GCM) in a separate file (`easytier_secret`), not in the default plaintext prefs.
+- **Debug logs are suppressed in release builds** — guarded by `BuildConfig.DEBUG`; only W/E levels reach logcat, the in-app log viewer still shows all levels.
+- **Mesh CIDR safelist** — injected routes are validated against private/special ranges (10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, fc00::/7, fe80::/10); a malicious peer advertising `0.0.0.0/0` or public ranges is rejected.
 
 ### Build
 
@@ -143,27 +125,3 @@ cd V2rayNG
 echo "sdk.dir=${ANDROID_HOME}" > local.properties
 ./gradlew assembleDebug            # or assembleRelease
 ```
-
-CI: `.github/workflows/build-easytier.yml` builds JNI + APK on push/PR. Use `build_release: true` for a release build.
-
-### Files modified in v2rayNG
-
-| File | Change |
-|------|--------|
-| `settings.gradle.kts` | +1 line: `include(":easytier-plugin")` |
-| `app/build.gradle.kts` | +3 lines: `implementation(project(":easytier-plugin"))` |
-| `AppConfig.kt` | (no EasyTier constants — plugin uses its own keys) |
-| `CoreConfigManager.kt` | `injectEasyTier()` + `injectEasyTierIntoCustomConfig()` |
-| `CoreServiceManager.kt` | `startEasyTier()` / `stopEasyTier()` lifecycle |
-| `CoreVpnService.kt` | mesh CIDR `addRoute()` in bypass-LAN mode |
-| `RootProxyManager.kt` | mesh CIDR re-MARK in iptables + LAN-sharing ip-rule |
-| `SettingsActivity.kt` | EasyTier settings entry point |
-| `res/xml/pref_settings.xml` | EasyTier PreferenceCategory |
-| `res/values*/strings.xml` | 6 strings each (en, zh-rCN, zh-rTW) |
-
-### Known limitations
-
-- `EasyTierDataPlaneJNI.kt` is reserved (unused) for future data-plane TCP/UDP APIs.
-- `getMeshCidrsStatic()` caches results for 5 seconds; topology changes may take up to 5s to propagate.
-- Mesh CIDRs are validated against a safelist (private ranges only) before injection — a malicious peer advertising `0.0.0.0/0` or public ranges will be rejected.
-- Network secret is stored in `EncryptedSharedPreferences` (AES-256-GCM) separate from the default plaintext prefs.
