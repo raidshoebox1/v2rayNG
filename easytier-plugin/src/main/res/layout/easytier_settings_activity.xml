@@ -43,6 +43,14 @@
                 android:text="@string/easytier_pref_enable_title" />
 
             <TextView
+                android:id="@+id/tv_enable_summary"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textAppearance="@style/TextAppearance.AppCompat.Caption"
+                android:textColor="?android:attr/textColorSecondary" />
+
+            <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
@@ -86,16 +94,6 @@
                 android:hint="@string/easytier_pref_hostname_hint"
                 android:inputType="text"
                 android:maxLines="1" />
-
-            <!-- ── Network ── -->
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="@string/easytier_pref_category_network"
-                android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
-                android:textColor="?attr/colorPrimary" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -143,6 +141,24 @@
                 android:inputType="number"
                 android:maxLines="1" />
 
+            <!-- ── Status ── -->
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:text="@string/easytier_pref_status_title"
+                android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
+                android:textColor="?attr/colorPrimary" />
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textAppearance="@style/TextAppearance.AppCompat.Body1"
+                android:fontFamily="monospace" />
+
             <!-- ── Diagnostics ── -->
 
             <TextView
@@ -152,21 +168,6 @@
                 android:text="@string/easytier_pref_category_diagnostics"
                 android:textAppearance="@style/TextAppearance.AppCompat.Subhead"
                 android:textColor="?attr/colorPrimary" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/easytier_pref_status_title"
-                android:textAppearance="@style/TextAppearance.AppCompat.Caption"
-                android:textColor="?android:attr/textColorSecondary" />
-
-            <TextView
-                android:id="@+id/tv_status"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
             <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/sw_log_enabled"
