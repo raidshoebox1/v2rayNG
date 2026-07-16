@@ -40,7 +40,6 @@
     <!-- Log -->
     <string name="easytier_pref_log_enabled_title">启用日志</string>
     <string name="easytier_pref_log_enabled_summary">捕获 EasyTier 日志以在应用内显示</string>
-    <string name="easytier_pref_log_level_title">日志级别</string>
 
     <!-- Status -->
     <string name="easytier_pref_status_title">状态</string>
@@ -55,7 +54,7 @@
 
     <!-- Diagnostics buttons -->
     <string name="easytier_pref_start_now_title">测试连接</string>
-    <string name="easytier_pref_stop_now_title">停止 EasyTier</string>
+    <string name="easytier_test_stop_title">停止测试</string>
     <string name="easytier_pref_view_logs_title">查看日志</string>
     <string name="easytier_pref_clear_logs_title">清除日志</string>
     <string name="easytier_pref_network_info_title">网络信息（高级）</string>
@@ -73,9 +72,7 @@
     <string name="easytier_logs_cleared">日志已清除</string>
     <string name="easytier_test_connected">已连接：%1$d 个对端，%2$d 个 mesh CIDR</string>
     <string name="easytier_test_no_peers">10 秒内未发现对端。请检查对端地址和网络名称。</string>
-    <string name="easytier_test_stopped">测试实例已停止</string>
     <string name="easytier_test_vpn_running">VPN 正在运行 EasyTier，状态显示在上方。</string>
-    <string name="easytier_stop_vpn_hint">停止 v2rayNG VPN 以停止 EasyTier。</string>
 
     <!-- Validation errors -->
     <string name="easytier_invalid_virtual_ip">虚拟 IP 格式无效（应为 10.144.144.1 或 10.144.144.1/24）</string>

@@ -6,6 +6,7 @@ import com.google.gson.JsonParser
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.LogCallback
 import com.easytier.plugin.BuildConfig
+import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -71,6 +72,29 @@ class EasyTierPlugin(private val context: Context) {
             "192.168.0.0/16"
         )
 
+        // ------------------------------------------------------------------
+        // Cross-process status snapshot
+        // ------------------------------------------------------------------
+
+        /**
+         * The VPN service process (`:RunSoLibV2RayDaemon`) runs the EasyTier
+         * native instance.  The Settings UI runs in the main process and
+         * cannot query the native instance directly via JNI (each process
+         * has its own native state).  To bridge this gap, the VPN process
+         * periodically writes the raw `collectNetworkInfos()` JSON to a
+         * file in the app's private files directory (shared across processes).
+         * The Settings UI reads this file to display status when no local
+         * (test) instance is running.
+         */
+        private const val STATUS_SNAPSHOT_FILE = "easytier_status.json"
+
+        /**
+         * Status snapshot is considered fresh for this long after it is
+         * written.  If the file is older than this, the VPN instance is
+         * assumed to be stopped (or the writer thread died).
+         */
+        private const val STATUS_SNAPSHOT_TTL_MS = 30_000L // 30 seconds
+
         /**
          * Check whether the EasyTier native library is available on this device.
          * The result is cached after the first check so subsequent calls are free.
@@ -96,6 +120,66 @@ class EasyTierPlugin(private val context: Context) {
                 Log.w(TAG, "EasyTier JNI native library not available on this device")
             }
             return available
+        }
+
+        // ------------------------------------------------------------------
+        // Cross-process status snapshot (written by VPN process, read by UI)
+        // ------------------------------------------------------------------
+
+        private fun statusSnapshotFile(context: Context): File =
+            File(context.applicationContext.filesDir, STATUS_SNAPSHOT_FILE)
+
+        /**
+         * Write the current `collectNetworkInfos()` JSON to the status
+         * snapshot file.  Called periodically by the VPN service process
+         * so the Settings UI (main process) can display live status.
+         *
+         * Atomic: writes to a temp file then renames.
+         */
+        @JvmStatic
+        fun writeStatusSnapshot(context: Context) {
+            if (!isJniAvailable()) return
+            try {
+                val json = EasyTierJNI.collectNetworkInfos(50)
+                if (json.isNullOrBlank()) return
+                val file = statusSnapshotFile(context)
+                val tmp = File(file.parentFile, "$STATUS_SNAPSHOT_FILE.tmp")
+                tmp.writeText(json)
+                tmp.renameTo(file)
+            } catch (e: Throwable) {
+                log("W", "Failed to write status snapshot", e)
+            }
+        }
+
+        /**
+         * Read the status snapshot JSON, or null if it doesn't exist or
+         * is stale (older than [STATUS_SNAPSHOT_TTL_MS]).
+         */
+        @JvmStatic
+        fun readStatusSnapshot(context: Context): String? {
+            return try {
+                val file = statusSnapshotFile(context)
+                if (!file.exists()) return null
+                val age = System.currentTimeMillis() - file.lastModified()
+                if (age > STATUS_SNAPSHOT_TTL_MS) return null
+                file.readText()
+            } catch (e: Throwable) {
+                log("W", "Failed to read status snapshot", e)
+                null
+            }
+        }
+
+        /**
+         * Delete the status snapshot file.  Called when the VPN instance
+         * is stopped so the UI doesn't show stale "running" state.
+         */
+        @JvmStatic
+        fun deleteStatusSnapshot(context: Context) {
+            try {
+                statusSnapshotFile(context).delete()
+            } catch (e: Throwable) {
+                // ignore
+            }
         }
 
         // ------------------------------------------------------------------
@@ -464,17 +548,31 @@ class EasyTierPlugin(private val context: Context) {
 
         /**
          * Query raw network info JSON from any running EasyTier instance
-         * for UI display (Network Info dialog). Calls the JNI directly.
+         * for UI display (Network Info dialog).
+         *
+         * Tries the JNI directly first (works for test instances running in
+         * the same process).  If no running instance is found locally,
+         * falls back to the cross-process status snapshot file written by
+         * the VPN service process.
          */
         @JvmStatic
-        fun getNetworkInfoJsonStatic(): String? {
-            if (!isJniAvailable()) return null
-            return try {
-                EasyTierJNI.collectNetworkInfos(50)
-            } catch (e: Throwable) {
-                log("W", "Failed to get network info", e)
-                null
+        fun getNetworkInfoJsonStatic(context: Context? = null): String? {
+            // Try JNI first (same-process instance, e.g. test instance)
+            if (isJniAvailable()) {
+                try {
+                    val json = EasyTierJNI.collectNetworkInfos(50)
+                    if (!json.isNullOrBlank() && hasRunningInstance(json)) {
+                        return json
+                    }
+                } catch (e: Throwable) {
+                    log("W", "Failed to get network info from JNI", e)
+                }
             }
+            // Fall back to cross-process snapshot (VPN process instance)
+            if (context != null) {
+                return readStatusSnapshot(context)
+            }
+            return null
         }
 
         // ------------------------------------------------------------------
@@ -494,7 +592,7 @@ class EasyTierPlugin(private val context: Context) {
             // Refuse to start a test instance if the VPN service already has one running.
             // Both use the same instance name (DEFAULT_INSTANCE_NAME), so starting a second
             // would conflict, and stopAllInstances() in stop() would kill the VPN instance.
-            if (isRunningStatic()) {
+            if (isRunningStatic(context)) {
                 log("W", "EasyTier: cannot start test instance — VPN instance is already running")
                 return false
             }
@@ -530,26 +628,53 @@ class EasyTierPlugin(private val context: Context) {
 
         /**
          * Check if any EasyTier instance is running (either via VPN or test).
+         *
+         * Tries the JNI directly first (same-process test instance).  If no
+         * running instance is found locally, checks the cross-process status
+         * snapshot file (VPN process instance).
+         *
+         * @param context optional; if provided, falls back to the status
+         *   snapshot file when JNI reports no running instance.
          */
         @JvmStatic
-        fun isRunningStatic(): Boolean {
-            if (!isJniAvailable()) return false
-            return try {
-                val json = EasyTierJNI.collectNetworkInfos(10)
-                if (json.isNullOrBlank()) return false
-                val parsed = JsonParser.parseString(json)
-                if (parsed.isJsonObject) {
-                    val mapObj = parsed.asJsonObject.getAsJsonObject("map")
-                        ?: parsed.asJsonObject
-                    for ((_, info) in mapObj.entrySet()) {
-                        val obj = info.asJsonObject
-                        if (obj.has("running") && obj.get("running").asBoolean) return true
+        @JvmOverloads
+        fun isRunningStatic(context: Context? = null): Boolean {
+            // Try JNI first (same-process instance)
+            if (isJniAvailable()) {
+                try {
+                    val json = EasyTierJNI.collectNetworkInfos(10)
+                    if (!json.isNullOrBlank() && hasRunningInstance(json)) {
+                        return true
                     }
+                } catch (e: Throwable) {
+                    // fall through to snapshot
                 }
-                false
-            } catch (e: Throwable) {
-                false
             }
+            // Fall back to cross-process snapshot
+            if (context != null) {
+                val snap = readStatusSnapshot(context) ?: return false
+                return try {
+                    hasRunningInstance(snap)
+                } catch (e: Throwable) {
+                    false
+                }
+            }
+            return false
+        }
+
+        /**
+         * Check if a collectNetworkInfos JSON string contains a running instance.
+         */
+        private fun hasRunningInstance(json: String): Boolean {
+            val parsed = JsonParser.parseString(json)
+            if (!parsed.isJsonObject) return false
+            val mapObj = parsed.asJsonObject.getAsJsonObject("map")
+                ?: parsed.asJsonObject
+            for ((_, info) in mapObj.entrySet()) {
+                val obj = info.asJsonObject
+                if (obj.has("running") && obj.get("running").asBoolean) return true
+            }
+            return false
         }
 
         // ------------------------------------------------------------------
@@ -558,147 +683,181 @@ class EasyTierPlugin(private val context: Context) {
 
         /**
          * Query the running EasyTier instance for structured status information.
-         * Returns null if JNI is unavailable or no instance is running.
+         *
+         * Tries the JNI directly first (works for test instances running in
+         * the same process).  If no running instance is found locally, falls
+         * back to the cross-process status snapshot file written by the VPN
+         * service process.
+         *
+         * Returns null if neither source has a running instance.
          *
          * Parses the collectNetworkInfos JSON to extract:
          * - Local node's virtual IP and hostname from my_node_info
          * - Peer list with latency, direct/relay status, tunnel type, traffic counters
          * - Mesh CIDRs (same as collectMeshCidrs)
+         *
+         * @param context optional; if provided, falls back to the status
+         *   snapshot file when JNI reports no running instance.
          */
         @JvmStatic
-        fun getPeerStatus(): MeshStatus? {
-            if (!isJniAvailable()) return null
-            return try {
-                val json = EasyTierJNI.collectNetworkInfos(50)
-                if (json.isNullOrBlank()) return null
-                val parsed = JsonParser.parseString(json)
-                if (!parsed.isJsonObject) return null
-                val mapObj = parsed.asJsonObject.getAsJsonObject("map")
-                    ?: parsed.asJsonObject
-
-                // Find the first running instance
-                var runningInfo: com.google.gson.JsonObject? = null
-                for ((_, info) in mapObj.entrySet()) {
-                    val obj = info.asJsonObject
-                    if (obj.has("running") && obj.get("running").asBoolean) {
-                        runningInfo = obj
-                        break
+        @JvmOverloads
+        fun getPeerStatus(context: Context? = null): MeshStatus? {
+            // Try JNI first (same-process instance, e.g. test instance)
+            if (isJniAvailable()) {
+                try {
+                    val json = EasyTierJNI.collectNetworkInfos(50)
+                    if (!json.isNullOrBlank()) {
+                        val status = parsePeerStatusJson(json)
+                        if (status != null && status.running) return status
                     }
-                    // Also check for error state — return the info even if not running
-                    if (runningInfo == null) runningInfo = obj
+                } catch (e: Throwable) {
+                    log("W", "Failed to get peer status from JNI", e)
                 }
-                if (runningInfo == null) return null
-
-                val running = runningInfo.has("running") && runningInfo.get("running").asBoolean
-                val errorMsg = runningInfo.get("error_msg")?.takeIf { !it.isJsonNull }?.asString
-
-                // Local node info
-                val myNodeInfo = runningInfo.getAsJsonObject("my_node_info")
-                val virtualIp = if (myNodeInfo != null) {
-                    parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4"))
-                } else null
-                val localHostname = myNodeInfo?.get("hostname")?.takeIf { !it.isJsonNull }?.asString
-
-                // Build a peer_id -> route map for hostname and virtual IP lookup
-                val routeMap = mutableMapOf<Long, com.google.gson.JsonObject>()
-                val routes = runningInfo.getAsJsonArray("routes")
-                if (routes != null) {
-                    for (route in routes) {
-                        val routeObj = route.asJsonObject
-                        val peerId = routeObj.get("peer_id")?.asLong ?: continue
-                        routeMap[peerId] = routeObj
-                    }
+            }
+            // Fall back to cross-process snapshot (VPN process instance)
+            if (context != null) {
+                val snap = readStatusSnapshot(context) ?: return null
+                return try {
+                    parsePeerStatusJson(snap)
+                } catch (e: Throwable) {
+                    log("W", "Failed to parse status snapshot", e)
+                    null
                 }
+            }
+            return null
+        }
 
-                // Parse peers
-                val peers = mutableListOf<MeshPeerInfo>()
-                val peersArray = runningInfo.getAsJsonArray("peers")
-                if (peersArray != null) {
-                    for (peerEntry in peersArray) {
-                        val peerObj = peerEntry.asJsonObject
-                        val peerId = peerObj.get("peer_id")?.asLong ?: continue
+        /**
+         * Parse a collectNetworkInfos JSON string into a [MeshStatus].
+         * Returns null if the JSON is blank or cannot be parsed.
+         * If no running instance is found, returns a MeshStatus with
+         * running=false (and errorMsg if present).
+         */
+        private fun parsePeerStatusJson(json: String): MeshStatus? {
+            val parsed = JsonParser.parseString(json)
+            if (!parsed.isJsonObject) return null
+            val mapObj = parsed.asJsonObject.getAsJsonObject("map")
+                ?: parsed.asJsonObject
 
-                        // Get hostname and virtual IP from the matching route
-                        val route = routeMap[peerId]
-                        val hostname = route?.get("hostname")?.takeIf { !it.isJsonNull }?.asString
-                            ?: "peer-$peerId"
-                        val virtualIp = route?.let { parseIpv4Addr(it.getAsJsonObject("ipv4_addr")) }
+            // Find the first running instance, or fall back to the first instance
+            var runningInfo: com.google.gson.JsonObject? = null
+            for ((_, info) in mapObj.entrySet()) {
+                val obj = info.asJsonObject
+                if (obj.has("running") && obj.get("running").asBoolean) {
+                    runningInfo = obj
+                    break
+                }
+                // Also check for error state — return the info even if not running
+                if (runningInfo == null) runningInfo = obj
+            }
+            if (runningInfo == null) return null
 
-                        // Check directly_connected_conns — non-empty means at least one direct connection
-                        val directlyConnected = peerObj.getAsJsonArray("directly_connected_conns")
-                        val isDirect = directlyConnected != null && directlyConnected.size() > 0
+            val running = runningInfo.has("running") && runningInfo.get("running").asBoolean
+            val errorMsg = runningInfo.get("error_msg")?.takeIf { !it.isJsonNull }?.asString
 
-                        // Find the first non-closed connection for stats
-                        val conns = peerObj.getAsJsonArray("conns")
-                        var latencyMs: Int? = null
-                        var tunnelType: String? = null
-                        var rxBytes = 0L
-                        var txBytes = 0L
-                        var isClosed = true
+            // Local node info
+            val myNodeInfo = runningInfo.getAsJsonObject("my_node_info")
+            val virtualIp = if (myNodeInfo != null) {
+                parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4"))
+            } else null
+            val localHostname = myNodeInfo?.get("hostname")?.takeIf { !it.isJsonNull }?.asString
 
-                        if (conns != null) {
-                            for (connEntry in conns) {
-                                val conn = connEntry.asJsonObject
-                                val connClosed = conn.get("is_closed")?.asBoolean ?: false
-                                if (!connClosed) {
-                                    isClosed = false
-                                    // Sum traffic across all non-closed connections
-                                    val stats = conn.getAsJsonObject("stats")
-                                    if (stats != null) {
-                                        rxBytes += stats.get("rx_bytes")?.asLong ?: 0L
-                                        txBytes += stats.get("tx_bytes")?.asLong ?: 0L
-                                        // Use latency from the first non-closed connection
-                                        if (latencyMs == null) {
-                                            val latencyUs = stats.get("latency_us")?.asLong
-                                            if (latencyUs != null && latencyUs > 0) {
-                                                latencyMs = (latencyUs / 1000).toInt()
-                                            }
+            // Build a peer_id -> route map for hostname and virtual IP lookup
+            val routeMap = mutableMapOf<Long, com.google.gson.JsonObject>()
+            val routes = runningInfo.getAsJsonArray("routes")
+            if (routes != null) {
+                for (route in routes) {
+                    val routeObj = route.asJsonObject
+                    val peerId = routeObj.get("peer_id")?.asLong ?: continue
+                    routeMap[peerId] = routeObj
+                }
+            }
+
+            // Parse peers
+            val peers = mutableListOf<MeshPeerInfo>()
+            val peersArray = runningInfo.getAsJsonArray("peers")
+            if (peersArray != null) {
+                for (peerEntry in peersArray) {
+                    val peerObj = peerEntry.asJsonObject
+                    val peerId = peerObj.get("peer_id")?.asLong ?: continue
+
+                    // Get hostname and virtual IP from the matching route
+                    val route = routeMap[peerId]
+                    val hostname = route?.get("hostname")?.takeIf { !it.isJsonNull }?.asString
+                        ?: "peer-$peerId"
+                    val virtualIp = route?.let { parseIpv4Addr(it.getAsJsonObject("ipv4_addr")) }
+
+                    // Check directly_connected_conns — non-empty means at least one direct connection
+                    val directlyConnected = peerObj.getAsJsonArray("directly_connected_conns")
+                    val isDirect = directlyConnected != null && directlyConnected.size() > 0
+
+                    // Find the first non-closed connection for stats
+                    val conns = peerObj.getAsJsonArray("conns")
+                    var latencyMs: Int? = null
+                    var tunnelType: String? = null
+                    var rxBytes = 0L
+                    var txBytes = 0L
+                    var isClosed = true
+
+                    if (conns != null) {
+                        for (connEntry in conns) {
+                            val conn = connEntry.asJsonObject
+                            val connClosed = conn.get("is_closed")?.asBoolean ?: false
+                            if (!connClosed) {
+                                isClosed = false
+                                // Sum traffic across all non-closed connections
+                                val stats = conn.getAsJsonObject("stats")
+                                if (stats != null) {
+                                    rxBytes += stats.get("rx_bytes")?.asLong ?: 0L
+                                    txBytes += stats.get("tx_bytes")?.asLong ?: 0L
+                                    // Use latency from the first non-closed connection
+                                    if (latencyMs == null) {
+                                        val latencyUs = stats.get("latency_us")?.asLong
+                                        if (latencyUs != null && latencyUs > 0) {
+                                            latencyMs = (latencyUs / 1000).toInt()
                                         }
                                     }
-                                    // Use tunnel type from the first non-closed connection
-                                    if (tunnelType == null) {
-                                        val tunnel = conn.getAsJsonObject("tunnel")
-                                        tunnelType = tunnel?.get("tunnel_type")?.takeIf { !it.isJsonNull }?.asString
-                                    }
+                                }
+                                // Use tunnel type from the first non-closed connection
+                                if (tunnelType == null) {
+                                    val tunnel = conn.getAsJsonObject("tunnel")
+                                    tunnelType = tunnel?.get("tunnel_type")?.takeIf { !it.isJsonNull }?.asString
                                 }
                             }
                         }
-
-                        // Fall back to route's path_latency if no connection latency
-                        if (latencyMs == null && route != null) {
-                            val pathLatency = route.get("path_latency")?.asLong
-                            if (pathLatency != null && pathLatency > 0) {
-                                latencyMs = (pathLatency / 1000).toInt()
-                            }
-                        }
-
-                        peers.add(MeshPeerInfo(
-                            hostname = hostname,
-                            virtualIp = virtualIp,
-                            latencyMs = latencyMs,
-                            isDirect = isDirect,
-                            isClosed = isClosed,
-                            tunnelType = tunnelType,
-                            rxBytes = rxBytes,
-                            txBytes = txBytes
-                        ))
                     }
+
+                    // Fall back to route's path_latency if no connection latency
+                    if (latencyMs == null && route != null) {
+                        val pathLatency = route.get("path_latency")?.asLong
+                        if (pathLatency != null && pathLatency > 0) {
+                            latencyMs = (pathLatency / 1000).toInt()
+                        }
+                    }
+
+                    peers.add(MeshPeerInfo(
+                        hostname = hostname,
+                        virtualIp = virtualIp,
+                        latencyMs = latencyMs,
+                        isDirect = isDirect,
+                        isClosed = isClosed,
+                        tunnelType = tunnelType,
+                        rxBytes = rxBytes,
+                        txBytes = txBytes
+                    ))
                 }
-
-                val meshCidrs = collectMeshCidrs()
-
-                MeshStatus(
-                    running = running,
-                    virtualIp = virtualIp,
-                    hostname = localHostname,
-                    peers = peers,
-                    meshCidrs = meshCidrs,
-                    errorMsg = errorMsg
-                )
-            } catch (e: Throwable) {
-                log("W", "Failed to get peer status", e)
-                null
             }
+
+            val meshCidrs = collectMeshCidrs()
+
+            return MeshStatus(
+                running = running,
+                virtualIp = virtualIp,
+                hostname = localHostname,
+                peers = peers,
+                meshCidrs = meshCidrs,
+                errorMsg = errorMsg
+            )
         }
     }
 

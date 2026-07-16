@@ -184,31 +184,12 @@
                 android:textAppearance="@style/TextAppearance.AppCompat.Caption"
                 android:textColor="?android:attr/textColorSecondary" />
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/easytier_pref_log_level_title"
-                android:textAppearance="@style/TextAppearance.AppCompat.Caption" />
-
-            <Spinner
-                android:id="@+id/sp_log_level"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_start"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text="@string/easytier_pref_start_now_title" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_stop"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/easytier_pref_stop_now_title" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_view_logs"
