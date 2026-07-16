@@ -3,6 +3,8 @@ package com.easytier.plugin.ui
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.LocaleList
 import android.text.method.ScrollingMovementMethod
 import android.view.View
@@ -26,7 +28,11 @@ import java.util.Locale
  *
  * Fields are auto-saved to SharedPreferences on focus loss (EditText) or
  * selection change (Switch/Spinner).  Diagnostic buttons at the bottom
- * allow starting/stopping EasyTier and viewing logs/network info.
+ * allow testing the connection and viewing logs/network info.
+ *
+ * A live status panel below the General settings shows the current mesh
+ * state (virtual IP, peers, mesh CIDRs) when EasyTier is running, refreshing
+ * every 2 seconds.
  *
  * Locale is provided by the launching app via [localeOverride] so the
  * plugin (which cannot access v2rayNG's SettingsManager) still respects
@@ -43,9 +49,14 @@ class EasyTierSettingsActivity : AppCompatActivity() {
          */
         @Volatile
         var localeOverride: String? = null
+
+        private const val STATUS_REFRESH_MS = 2000L
+        private const val PEER_POLL_INTERVAL_MS = 2000L
+        private const val PEER_POLL_MAX_MS = 10000L
     }
 
     private lateinit var swEnable: SwitchCompat
+    private lateinit var tvEnableSummary: TextView
     private lateinit var etNetworkName: EditText
     private lateinit var etNetworkSecret: EditText
     private lateinit var etHostname: EditText
@@ -58,6 +69,13 @@ class EasyTierSettingsActivity : AppCompatActivity() {
 
     private val logLevels = arrayOf("error", "warn", "info", "debug", "trace")
     private var isLoading = false
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val statusRunnable = object : Runnable {
+        override fun run() {
+            refreshStatusAsync()
+        }
+    }
 
     override fun attachBaseContext(newBase: Context) {
         val tag = localeOverride
@@ -91,12 +109,8 @@ class EasyTierSettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // Ensure the cross-process snapshot file exists and is up-to-date.
-        // This is important after an app upgrade: the snapshot file may not
-        // exist yet, and the service process would fall back to stale
-        // SharedPreferences.  Calling flushSnapshot() here creates the file
-        // from the main process's fresh SharedPreferences.
         EasyTierSettingsManager.flushSnapshot(applicationContext)
-        refreshStatus()
+        refreshStatusAsync()
     }
 
     /**
@@ -107,6 +121,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
      */
     override fun onPause() {
         super.onPause()
+        mainHandler.removeCallbacks(statusRunnable)
         saveAllFields()
         // Safety net: ensure the cross-process snapshot file is up-to-date
         // even if an individual setter missed writing it.
@@ -122,6 +137,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
 
     private fun bindViews() {
         swEnable = findViewById(R.id.sw_enable)
+        tvEnableSummary = findViewById(R.id.tv_enable_summary)
         etNetworkName = findViewById(R.id.et_network_name)
         etNetworkSecret = findViewById(R.id.et_network_secret)
         etHostname = findViewById(R.id.et_hostname)
@@ -139,6 +155,7 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         isLoading = true
         val ctx = applicationContext
         swEnable.isChecked = EasyTierSettingsManager.isEnabled(ctx)
+        updateEnableSummary(swEnable.isChecked)
         etNetworkName.setText(EasyTierSettingsManager.getNetworkName(ctx))
         etNetworkSecret.setText(EasyTierSettingsManager.getNetworkSecret(ctx))
         etHostname.setText(EasyTierSettingsManager.getHostname(ctx) ?: "")
@@ -163,7 +180,10 @@ class EasyTierSettingsActivity : AppCompatActivity() {
 
     private fun setupAutoSave() {
         swEnable.setOnCheckedChangeListener { _, isChecked ->
-            if (!isLoading) EasyTierSettingsManager.setEnabled(applicationContext, isChecked)
+            if (!isLoading) {
+                EasyTierSettingsManager.setEnabled(applicationContext, isChecked)
+                updateEnableSummary(isChecked)
+            }
         }
 
         val focusListener = View.OnFocusChangeListener { v, hasFocus ->
@@ -188,6 +208,14 @@ class EasyTierSettingsActivity : AppCompatActivity() {
                 if (!isLoading) EasyTierSettingsManager.setLogLevel(applicationContext, logLevels[position])
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun updateEnableSummary(enabled: Boolean) {
+        tvEnableSummary.text = if (enabled) {
+            getString(R.string.easytier_enable_summary_on)
+        } else {
+            getString(R.string.easytier_enable_summary_off)
         }
     }
 
@@ -274,10 +302,10 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         return true
     }
 
-    // ── Diagnostics ──
+    // ── Status panel ──
 
     private fun setupDiagnostics() {
-        findViewById<View>(R.id.btn_start).setOnClickListener { startEasyTier() }
+        findViewById<View>(R.id.btn_start).setOnClickListener { testConnection() }
         findViewById<View>(R.id.btn_stop).setOnClickListener { stopEasyTier() }
         findViewById<View>(R.id.btn_view_logs).setOnClickListener { showLogDialog() }
         findViewById<View>(R.id.btn_clear_logs).setOnClickListener {
@@ -287,18 +315,95 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.btn_network_info).setOnClickListener { showNetworkInfoDialog() }
     }
 
-    private fun refreshStatus() {
-        val status = EasyTierPlugin.getStatus()
-        val error = EasyTierPlugin.getLastError()
-        tvStatus.text = when (status) {
-            "running" -> getString(R.string.easytier_status_running)
-            "starting" -> getString(R.string.easytier_status_starting)
-            "error" -> getString(R.string.easytier_status_error) + (error?.let { ": $it" } ?: "")
-            else -> getString(R.string.easytier_status_stopped)
-        }
+    /**
+     * Refresh the status panel asynchronously.  Calls getPeerStatus() on a
+     * background thread and updates the UI on the main thread, then schedules
+     * the next refresh.
+     */
+    private fun refreshStatusAsync() {
+        Thread {
+            val status = EasyTierPlugin.getPeerStatus()
+            mainHandler.post {
+                updateStatusPanel(status)
+                // Schedule next refresh only if the activity is still resumed
+                if (!isFinishing && !isDestroyed) {
+                    mainHandler.postDelayed(statusRunnable, STATUS_REFRESH_MS)
+                }
+            }
+        }.start()
     }
 
-    private fun startEasyTier() {
+    /**
+     * Update the status panel with the given MeshStatus.  Shows a multi-line
+     * summary including virtual IP, peer list with latency/direct/relay, and
+     * mesh CIDRs.
+     */
+    private fun updateStatusPanel(status: EasyTierPlugin.MeshStatus?) {
+        if (status == null || !status.running) {
+            if (status?.errorMsg != null) {
+                tvStatus.text = getString(R.string.easytier_status_error) + ": " + status.errorMsg
+            } else {
+                tvStatus.text = getString(R.string.easytier_no_status)
+            }
+            return
+        }
+
+        val sb = StringBuilder()
+        sb.append("● ").append(getString(R.string.easytier_status_running))
+        sb.append("\n")
+
+        if (status.virtualIp != null) {
+            sb.append(getString(R.string.easytier_status_virtual_ip, status.virtualIp))
+            sb.append("\n")
+        }
+
+        if (status.peers.isEmpty()) {
+            sb.append(getString(R.string.easytier_status_converging))
+        } else {
+            sb.append(getString(R.string.easytier_status_peers, status.peers.size))
+            sb.append("\n")
+            for (peer in status.peers) {
+                sb.append("  ")
+                sb.append(peer.hostname)
+                if (peer.virtualIp != null) {
+                    sb.append("  ").append(peer.virtualIp)
+                }
+                if (peer.latencyMs != null) {
+                    sb.append("  ").append(peer.latencyMs).append("ms")
+                }
+                sb.append("  ")
+                if (peer.isClosed) {
+                    sb.append(getString(R.string.easytier_peer_closed))
+                } else if (peer.isDirect) {
+                    sb.append(getString(R.string.easytier_peer_direct))
+                } else {
+                    sb.append(getString(R.string.easytier_peer_relay))
+                }
+                sb.append("\n")
+            }
+        }
+
+        if (status.meshCidrs.isNotEmpty()) {
+            sb.append(getString(R.string.easytier_status_mesh_cidrs))
+            sb.append("\n")
+            for (cidr in status.meshCidrs) {
+                sb.append("  ").append(cidr).append("\n")
+            }
+        }
+
+        tvStatus.text = sb.toString().trimEnd()
+    }
+
+    // ── Test Connection ──
+
+    /**
+     * Start a temporary EasyTier instance, wait for peers to converge (up to
+     * 10 seconds), display the result, then automatically stop the instance.
+     *
+     * If the VPN service already has an EasyTier instance running, the test
+     * is skipped — the status panel above already shows the live state.
+     */
+    private fun testConnection() {
         saveAllFields()
         val ctx = applicationContext
         val config = EasyTierSettingsManager.getEasyTierConfig(ctx)
@@ -309,26 +414,90 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         }
         if (EasyTierPlugin.isRunningStatic()) {
             EasyTierPlugin.log("W", "EasyTier: cannot start test instance — VPN instance is already running")
-            Toast.makeText(this, R.string.easytier_already_running, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, R.string.easytier_test_vpn_running, Toast.LENGTH_LONG).show()
+            refreshStatusAsync()
             return
         }
-        EasyTierPlugin.log("I", "EasyTier: starting from settings UI (network=${config.networkName}, hostname=${config.hostname}, peers=${config.peers.size} peer(s), socks5=${config.socks5Port})")
-        val started = EasyTierPlugin.startTest(ctx, config)
-        if (started) {
-            Toast.makeText(this, R.string.easytier_started, Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, R.string.easytier_start_failed, Toast.LENGTH_LONG).show()
-        }
-        refreshStatus()
+
+        // Disable the Test button while testing
+        findViewById<View>(R.id.btn_start).isEnabled = false
+        tvStatus.text = getString(R.string.easytier_status_starting)
+
+        EasyTierPlugin.log("I", "EasyTier: test connection from settings UI (network=${config.networkName}, hostname=${config.hostname}, peers=${config.peers.size} peer(s), socks5=${config.socks5Port})")
+
+        Thread {
+            // Stop any existing test instance first
+            EasyTierPlugin.stopTest()
+            val started = EasyTierPlugin.startTest(ctx, config)
+
+            if (!started) {
+                mainHandler.post {
+                    if (isFinishing || isDestroyed) return@post
+                    findViewById<View>(R.id.btn_start).isEnabled = true
+                    val err = EasyTierPlugin.getLastError()
+                    tvStatus.text = getString(R.string.easytier_status_error) + (err?.let { ": $it" } ?: "")
+                    Toast.makeText(this, R.string.easytier_start_failed, Toast.LENGTH_LONG).show()
+                }
+                return@Thread
+            }
+
+            // Wait for peers to converge (up to 10 seconds, poll every 2 seconds)
+            var peerCount = 0
+            var meshCidrCount = 0
+            var found = false
+            val pollStart = System.currentTimeMillis()
+            while (System.currentTimeMillis() - pollStart < PEER_POLL_MAX_MS) {
+                Thread.sleep(PEER_POLL_INTERVAL_MS)
+                val status = EasyTierPlugin.getPeerStatus()
+                if (status != null && status.running && status.peers.isNotEmpty()) {
+                    peerCount = status.peers.size
+                    meshCidrCount = status.meshCidrs.size
+                    found = true
+                    break
+                }
+            }
+
+            if (!found) {
+                // Even if no peers, check if the instance is running
+                val status = EasyTierPlugin.getPeerStatus()
+                if (status != null && status.running) {
+                    peerCount = 0
+                    meshCidrCount = status.meshCidrs.size
+                }
+            }
+
+            // Stop the test instance
+            EasyTierPlugin.stopTest()
+
+            mainHandler.post {
+                if (isFinishing || isDestroyed) return@post
+                findViewById<View>(R.id.btn_start).isEnabled = true
+                if (found) {
+                    Toast.makeText(this, getString(R.string.easytier_test_connected, peerCount, meshCidrCount), Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, R.string.easytier_test_no_peers, Toast.LENGTH_LONG).show()
+                }
+                // Refresh the status panel (will show "not running" after stopTest)
+                refreshStatusAsync()
+            }
+        }.start()
     }
 
     private fun stopEasyTier() {
-        // Only stop the test instance started from this UI.
-        // Do NOT call EasyTierJNI.stopAllInstances() here — that would also
-        // kill the VPN service's EasyTier instance (started by CoreServiceManager),
-        // breaking the active VPN connection.
-        EasyTierPlugin.stopTest()
-        refreshStatus()
+        // If the test instance (started from this UI) is running, stop it.
+        if (EasyTierPlugin.isTestRunning()) {
+            EasyTierPlugin.stopTest()
+            Toast.makeText(this, R.string.easytier_test_stopped, Toast.LENGTH_SHORT).show()
+            refreshStatusAsync()
+            return
+        }
+        // If the VPN service's instance is running, we can only stop it by stopping VPN.
+        if (EasyTierPlugin.isRunningStatic()) {
+            Toast.makeText(this, R.string.easytier_stop_vpn_hint, Toast.LENGTH_LONG).show()
+            return
+        }
+        // Nothing is running.
+        refreshStatusAsync()
     }
 
     private fun showLogDialog() {

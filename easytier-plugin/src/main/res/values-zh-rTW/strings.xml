@@ -10,6 +10,8 @@
 
     <!-- Enable -->
     <string name="easytier_pref_enable_title">在 v2rayNG 旁路執行 EasyTier 組網</string>
+    <string name="easytier_enable_summary_on">連線 v2rayNG VPN 時將自動啟動 EasyTier。</string>
+    <string name="easytier_enable_summary_off">已停用。啟用後將在 VPN 連線時啟動 EasyTier。</string>
 
     <!-- Network Name -->
     <string name="easytier_pref_network_name_title">網路名稱</string>
@@ -42,13 +44,21 @@
 
     <!-- Status -->
     <string name="easytier_pref_status_title">狀態</string>
+    <string name="easytier_no_status">EasyTier 未執行。請連線 VPN 或點擊「測試連線」。</string>
+    <string name="easytier_status_virtual_ip">虛擬 IP：%1$s</string>
+    <string name="easytier_status_peers">對端：%1$d 個已連線</string>
+    <string name="easytier_status_converging">收斂中（0 個對端）…</string>
+    <string name="easytier_status_mesh_cidrs">Mesh CIDR：</string>
+    <string name="easytier_peer_direct">直連</string>
+    <string name="easytier_peer_relay">中繼</string>
+    <string name="easytier_peer_closed">已斷線</string>
 
     <!-- Diagnostics buttons -->
-    <string name="easytier_pref_start_now_title">立即啟動 EasyTier</string>
+    <string name="easytier_pref_start_now_title">測試連線</string>
     <string name="easytier_pref_stop_now_title">停止 EasyTier</string>
     <string name="easytier_pref_view_logs_title">查看日誌</string>
     <string name="easytier_pref_clear_logs_title">清除日誌</string>
-    <string name="easytier_pref_network_info_title">網路資訊</string>
+    <string name="easytier_pref_network_info_title">網路資訊（進階）</string>
 
     <!-- Status values -->
     <string name="easytier_status_stopped">已停止</string>
@@ -61,6 +71,11 @@
     <string name="easytier_start_failed">EasyTier 啟動失敗 — 請查看日誌</string>
     <string name="easytier_start_failed_disabled">請先啟用 EasyTier 並設定網路名稱</string>
     <string name="easytier_logs_cleared">日誌已清除</string>
+    <string name="easytier_test_connected">已連線：%1$d 個對端，%2$d 個 mesh CIDR</string>
+    <string name="easytier_test_no_peers">10 秒內未發現對端。請檢查對端位址和網路名稱。</string>
+    <string name="easytier_test_stopped">測試實例已停止</string>
+    <string name="easytier_test_vpn_running">VPN 正在執行 EasyTier，狀態顯示在上方。</string>
+    <string name="easytier_stop_vpn_hint">停止 v2rayNG VPN 以停止 EasyTier。</string>
 
     <!-- Validation errors -->
     <string name="easytier_invalid_virtual_ip">虛擬 IP 格式無效（應為 10.144.144.1 或 10.144.144.1/24）</string>
