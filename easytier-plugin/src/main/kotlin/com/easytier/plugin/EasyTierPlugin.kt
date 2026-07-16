@@ -26,6 +26,32 @@ import java.net.Socket
  */
 class EasyTierPlugin(private val context: Context) {
 
+    /**
+     * Information about a single mesh peer, for UI display.
+     */
+    data class MeshPeerInfo(
+        val hostname: String,
+        val virtualIp: String?,
+        val latencyMs: Int?,
+        val isDirect: Boolean,
+        val isClosed: Boolean,
+        val tunnelType: String?,
+        val rxBytes: Long,
+        val txBytes: Long
+    )
+
+    /**
+     * Overall mesh status for UI display.
+     */
+    data class MeshStatus(
+        val running: Boolean,
+        val virtualIp: String?,
+        val hostname: String?,
+        val peers: List<MeshPeerInfo>,
+        val meshCidrs: List<String>,
+        val errorMsg: String?
+    )
+
     companion object {
         private const val TAG = "EasyTierPlugin"
 
@@ -529,32 +555,6 @@ class EasyTierPlugin(private val context: Context) {
         // ------------------------------------------------------------------
         // Structured peer status for UI display
         // ------------------------------------------------------------------
-
-        /**
-         * Information about a single mesh peer, for UI display.
-         */
-        data class MeshPeerInfo(
-            val hostname: String,
-            val virtualIp: String?,
-            val latencyMs: Int?,
-            val isDirect: Boolean,
-            val isClosed: Boolean,
-            val tunnelType: String?,
-            val rxBytes: Long,
-            val txBytes: Long
-        )
-
-        /**
-         * Overall mesh status for UI display.
-         */
-        data class MeshStatus(
-            val running: Boolean,
-            val virtualIp: String?,
-            val hostname: String?,
-            val peers: List<MeshPeerInfo>,
-            val meshCidrs: List<String>,
-            val errorMsg: String?
-        )
 
         /**
          * Query the running EasyTier instance for structured status information.
