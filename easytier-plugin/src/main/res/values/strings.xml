@@ -10,6 +10,8 @@
 
     <!-- Enable -->
     <string name="easytier_pref_enable_title">Run EasyTier mesh network alongside v2rayNG</string>
+    <string name="easytier_enable_summary_on">EasyTier will start automatically when v2rayNG VPN is connected.</string>
+    <string name="easytier_enable_summary_off">Disabled. Enable to start EasyTier with VPN.</string>
     <string name="easytier_pref_network_name_title">Network Name</string>
     <string name="easytier_pref_network_name_hint">Must match across all peers</string>
 
@@ -40,13 +42,21 @@
 
     <!-- Status -->
     <string name="easytier_pref_status_title">Status</string>
+    <string name="easytier_no_status">EasyTier is not running. Start VPN or tap Test Connection.</string>
+    <string name="easytier_status_virtual_ip">Virtual IP: %1$s</string>
+    <string name="easytier_status_peers">Peers: %1$d connected</string>
+    <string name="easytier_status_converging">Converging (0 peers)…</string>
+    <string name="easytier_status_mesh_cidrs">Mesh CIDRs:</string>
+    <string name="easytier_peer_direct">direct</string>
+    <string name="easytier_peer_relay">relay</string>
+    <string name="easytier_peer_closed">closed</string>
 
     <!-- Diagnostics buttons -->
-    <string name="easytier_pref_start_now_title">Start EasyTier Now</string>
+    <string name="easytier_pref_start_now_title">Test Connection</string>
     <string name="easytier_pref_stop_now_title">Stop EasyTier</string>
     <string name="easytier_pref_view_logs_title">View Logs</string>
     <string name="easytier_pref_clear_logs_title">Clear Logs</string>
-    <string name="easytier_pref_network_info_title">Network Info</string>
+    <string name="easytier_pref_network_info_title">Network Info (Advanced)</string>
 
     <!-- Status values -->
     <string name="easytier_status_stopped">Stopped</string>
@@ -59,6 +69,11 @@
     <string name="easytier_start_failed">EasyTier failed to start — check Logs</string>
     <string name="easytier_start_failed_disabled">Enable EasyTier and set Network Name first</string>
     <string name="easytier_logs_cleared">Logs cleared</string>
+    <string name="easytier_test_connected">Connected: %1$d peers, %2$d mesh CIDRs</string>
+    <string name="easytier_test_no_peers">No peers found within 10s. Check peers and network name.</string>
+    <string name="easytier_test_stopped">Test instance stopped</string>
+    <string name="easytier_test_vpn_running">VPN is running EasyTier. Status shown above.</string>
+    <string name="easytier_stop_vpn_hint">Stop v2rayNG VPN to stop EasyTier.</string>
 
     <!-- Validation errors -->
     <string name="easytier_invalid_virtual_ip">Invalid virtual IP (expected: 10.144.144.1 or 10.144.144.1/24)</string>

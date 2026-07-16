@@ -268,6 +268,65 @@ class EasyTierPlugin(private val context: Context) {
             meshCidrsCacheTime = 0L
         }
 
+        // ------------------------------------------------------------------
+        // Ipv4Inet / Ipv6Inet JSON parsing helpers
+        // ------------------------------------------------------------------
+
+        /**
+         * Convert a uint32 IPv4 address (big-endian) to dotted-decimal string.
+         * Example: 0x0A909001 -> "10.144.144.1"
+         */
+        private fun formatIpv4(addr: Long): String {
+            return "${(addr shr 24) and 0xFF}.${(addr shr 16) and 0xFF}.${(addr shr 8) and 0xFF}.${addr and 0xFF}"
+        }
+
+        /**
+         * Parse an Ipv4Inet JSON object ({ "address": { "addr": <uint32> }, "network_length": <int> })
+         * into a CIDR string "a.b.c.d/n".  Returns null if the object is null or malformed.
+         */
+        private fun parseIpv4InetCidr(obj: com.google.gson.JsonObject?): String? {
+            if (obj == null) return null
+            val addressObj = obj.getAsJsonObject("address") ?: return null
+            val addr = addressObj.get("addr")?.asLong ?: return null
+            val networkLength = obj.get("network_length")?.asInt ?: return null
+            return "${formatIpv4(addr)}/$networkLength"
+        }
+
+        /**
+         * Parse an Ipv4Inet JSON object and return just the IP address (without prefix).
+         */
+        private fun parseIpv4Addr(obj: com.google.gson.JsonObject?): String? {
+            if (obj == null) return null
+            val addressObj = obj.getAsJsonObject("address") ?: return null
+            val addr = addressObj.get("addr")?.asLong ?: return null
+            return formatIpv4(addr)
+        }
+
+        /**
+         * Parse an Ipv6Inet JSON object ({ "address": { "part1..part4": <uint32> }, "network_length": <int> })
+         * into a CIDR string "xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:xxxx/n".  Returns null if malformed.
+         */
+        private fun parseIpv6InetCidr(obj: com.google.gson.JsonObject?): String? {
+            if (obj == null) return null
+            val addressObj = obj.getAsJsonObject("address") ?: return null
+            val p1 = addressObj.get("part1")?.asLong ?: return null
+            val p2 = addressObj.get("part2")?.asLong ?: return null
+            val p3 = addressObj.get("part3")?.asLong ?: return null
+            val p4 = addressObj.get("part4")?.asLong ?: return null
+            val networkLength = obj.get("network_length")?.asInt ?: return null
+            val groups = arrayOf(
+                ((p1 shr 16) and 0xFFFF).toInt(),
+                (p1 and 0xFFFF).toInt(),
+                ((p2 shr 16) and 0xFFFF).toInt(),
+                (p2 and 0xFFFF).toInt(),
+                ((p3 shr 16) and 0xFFFF).toInt(),
+                (p3 and 0xFFFF).toInt(),
+                ((p4 shr 16) and 0xFFFF).toInt(),
+                (p4 and 0xFFFF).toInt()
+            )
+            return "${groups.joinToString(":") { it.toString(16) }}/$networkLength"
+        }
+
         private fun collectMeshCidrs(): List<String> {
             return try {
                 val json = EasyTierJNI.collectNetworkInfos(10)
@@ -288,15 +347,8 @@ class EasyTierPlugin(private val context: Context) {
                         //    virtual LAN would not be routed through EasyTier.
                         val myNodeInfo = obj.getAsJsonObject("my_node_info")
                         if (myNodeInfo != null) {
-                            val virtualIpv4 = myNodeInfo.getAsJsonObject("virtual_ipv4")
-                            if (virtualIpv4 != null) {
-                                val addr = virtualIpv4.get("address")?.asString
-                                val networkLength = virtualIpv4.get("network_length")?.asInt
-                                if (addr != null && networkLength != null) {
-                                    val cidr = "$addr/$networkLength"
-                                    if (isSafeMeshCidr(cidr)) cidrs.add(cidr)
-                                }
-                            }
+                            val cidr = parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4"))
+                            if (cidr != null && isSafeMeshCidr(cidr)) cidrs.add(cidr)
                         }
 
                         // 2. Extract each remote peer's virtual IP from route entries (ipv4_addr).
@@ -308,27 +360,13 @@ class EasyTierPlugin(private val context: Context) {
                             for (route in routes) {
                                 val routeObj = route.asJsonObject
 
-                                // Peer's virtual IP address (Ipv4Inet: { address, network_length })
-                                val ipv4Addr = routeObj.getAsJsonObject("ipv4_addr")
-                                if (ipv4Addr != null) {
-                                    val addr = ipv4Addr.get("address")?.asString
-                                    val networkLength = ipv4Addr.get("network_length")?.asInt
-                                    if (addr != null && networkLength != null) {
-                                        val cidr = "$addr/$networkLength"
-                                        if (isSafeMeshCidr(cidr)) cidrs.add(cidr)
-                                    }
-                                }
+                                // Peer's virtual IPv4 address (Ipv4Inet: { address: { addr: uint32 }, network_length })
+                                val ipv4Cidr = parseIpv4InetCidr(routeObj.getAsJsonObject("ipv4_addr"))
+                                if (ipv4Cidr != null && isSafeMeshCidr(ipv4Cidr)) cidrs.add(ipv4Cidr)
 
-                                // IPv6 virtual address (Ipv6Inet: { address, network_length })
-                                val ipv6Addr = routeObj.getAsJsonObject("ipv6_addr")
-                                if (ipv6Addr != null) {
-                                    val addr = ipv6Addr.get("address")?.asString
-                                    val networkLength = ipv6Addr.get("network_length")?.asInt
-                                    if (addr != null && networkLength != null) {
-                                        val cidr = "$addr/$networkLength"
-                                        if (isSafeMeshCidr(cidr)) cidrs.add(cidr)
-                                    }
-                                }
+                                // IPv6 virtual address (Ipv6Inet: { address: { part1..part4: uint32 }, network_length })
+                                val ipv6Cidr = parseIpv6InetCidr(routeObj.getAsJsonObject("ipv6_addr"))
+                                if (ipv6Cidr != null && isSafeMeshCidr(ipv6Cidr)) cidrs.add(ipv6Cidr)
 
                                 // proxy_cidrs: additional subnet ranges the peer proxies
                                 // (e.g. a LAN behind the peer, or a VPN portal client network).
@@ -399,8 +437,8 @@ class EasyTierPlugin(private val context: Context) {
         }
 
         /**
-         * Static version of getNetworkInfoJson() for UI display without
-         * needing a plugin instance. Calls the JNI directly.
+         * Query raw network info JSON from any running EasyTier instance
+         * for UI display (Network Info dialog). Calls the JNI directly.
          */
         @JvmStatic
         fun getNetworkInfoJsonStatic(): String? {
@@ -457,6 +495,14 @@ class EasyTierPlugin(private val context: Context) {
         }
 
         /**
+         * Check if the test instance (started from settings UI) is running.
+         * Returns false if no test instance exists or if the VPN service's
+         * instance is the one running.
+         */
+        @JvmStatic
+        fun isTestRunning(): Boolean = testInstance != null && testInstance!!.isRunning()
+
+        /**
          * Check if any EasyTier instance is running (either via VPN or test).
          */
         @JvmStatic
@@ -477,6 +523,181 @@ class EasyTierPlugin(private val context: Context) {
                 false
             } catch (e: Throwable) {
                 false
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Structured peer status for UI display
+        // ------------------------------------------------------------------
+
+        /**
+         * Information about a single mesh peer, for UI display.
+         */
+        data class MeshPeerInfo(
+            val hostname: String,
+            val virtualIp: String?,
+            val latencyMs: Int?,
+            val isDirect: Boolean,
+            val isClosed: Boolean,
+            val tunnelType: String?,
+            val rxBytes: Long,
+            val txBytes: Long
+        )
+
+        /**
+         * Overall mesh status for UI display.
+         */
+        data class MeshStatus(
+            val running: Boolean,
+            val virtualIp: String?,
+            val hostname: String?,
+            val peers: List<MeshPeerInfo>,
+            val meshCidrs: List<String>,
+            val errorMsg: String?
+        )
+
+        /**
+         * Query the running EasyTier instance for structured status information.
+         * Returns null if JNI is unavailable or no instance is running.
+         *
+         * Parses the collectNetworkInfos JSON to extract:
+         * - Local node's virtual IP and hostname from my_node_info
+         * - Peer list with latency, direct/relay status, tunnel type, traffic counters
+         * - Mesh CIDRs (same as collectMeshCidrs)
+         */
+        @JvmStatic
+        fun getPeerStatus(): MeshStatus? {
+            if (!isJniAvailable()) return null
+            return try {
+                val json = EasyTierJNI.collectNetworkInfos(50)
+                if (json.isNullOrBlank()) return null
+                val parsed = JsonParser.parseString(json)
+                if (!parsed.isJsonObject) return null
+                val mapObj = parsed.asJsonObject.getAsJsonObject("map")
+                    ?: parsed.asJsonObject
+
+                // Find the first running instance
+                var runningInfo: com.google.gson.JsonObject? = null
+                for ((_, info) in mapObj.entrySet()) {
+                    val obj = info.asJsonObject
+                    if (obj.has("running") && obj.get("running").asBoolean) {
+                        runningInfo = obj
+                        break
+                    }
+                    // Also check for error state — return the info even if not running
+                    if (runningInfo == null) runningInfo = obj
+                }
+                if (runningInfo == null) return null
+
+                val running = runningInfo.has("running") && runningInfo.get("running").asBoolean
+                val errorMsg = runningInfo.get("error_msg")?.takeIf { !it.isJsonNull }?.asString
+
+                // Local node info
+                val myNodeInfo = runningInfo.getAsJsonObject("my_node_info")
+                val virtualIp = if (myNodeInfo != null) {
+                    parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4"))
+                } else null
+                val localHostname = myNodeInfo?.get("hostname")?.takeIf { !it.isJsonNull }?.asString
+
+                // Build a peer_id -> route map for hostname and virtual IP lookup
+                val routeMap = mutableMapOf<Long, com.google.gson.JsonObject>()
+                val routes = runningInfo.getAsJsonArray("routes")
+                if (routes != null) {
+                    for (route in routes) {
+                        val routeObj = route.asJsonObject
+                        val peerId = routeObj.get("peer_id")?.asLong ?: continue
+                        routeMap[peerId] = routeObj
+                    }
+                }
+
+                // Parse peers
+                val peers = mutableListOf<MeshPeerInfo>()
+                val peersArray = runningInfo.getAsJsonArray("peers")
+                if (peersArray != null) {
+                    for (peerEntry in peersArray) {
+                        val peerObj = peerEntry.asJsonObject
+                        val peerId = peerObj.get("peer_id")?.asLong ?: continue
+
+                        // Get hostname and virtual IP from the matching route
+                        val route = routeMap[peerId]
+                        val hostname = route?.get("hostname")?.takeIf { !it.isJsonNull }?.asString
+                            ?: "peer-$peerId"
+                        val virtualIp = route?.let { parseIpv4Addr(it.getAsJsonObject("ipv4_addr")) }
+
+                        // Check directly_connected_conns — non-empty means at least one direct connection
+                        val directlyConnected = peerObj.getAsJsonArray("directly_connected_conns")
+                        val isDirect = directlyConnected != null && directlyConnected.size() > 0
+
+                        // Find the first non-closed connection for stats
+                        val conns = peerObj.getAsJsonArray("conns")
+                        var latencyMs: Int? = null
+                        var tunnelType: String? = null
+                        var rxBytes = 0L
+                        var txBytes = 0L
+                        var isClosed = true
+
+                        if (conns != null) {
+                            for (connEntry in conns) {
+                                val conn = connEntry.asJsonObject
+                                val connClosed = conn.get("is_closed")?.asBoolean ?: false
+                                if (!connClosed) {
+                                    isClosed = false
+                                    // Sum traffic across all non-closed connections
+                                    val stats = conn.getAsJsonObject("stats")
+                                    if (stats != null) {
+                                        rxBytes += stats.get("rx_bytes")?.asLong ?: 0L
+                                        txBytes += stats.get("tx_bytes")?.asLong ?: 0L
+                                        // Use latency from the first non-closed connection
+                                        if (latencyMs == null) {
+                                            val latencyUs = stats.get("latency_us")?.asLong
+                                            if (latencyUs != null && latencyUs > 0) {
+                                                latencyMs = (latencyUs / 1000).toInt()
+                                            }
+                                        }
+                                    }
+                                    // Use tunnel type from the first non-closed connection
+                                    if (tunnelType == null) {
+                                        val tunnel = conn.getAsJsonObject("tunnel")
+                                        tunnelType = tunnel?.get("tunnel_type")?.takeIf { !it.isJsonNull }?.asString
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fall back to route's path_latency if no connection latency
+                        if (latencyMs == null && route != null) {
+                            val pathLatency = route.get("path_latency")?.asLong
+                            if (pathLatency != null && pathLatency > 0) {
+                                latencyMs = (pathLatency / 1000).toInt()
+                            }
+                        }
+
+                        peers.add(MeshPeerInfo(
+                            hostname = hostname,
+                            virtualIp = virtualIp,
+                            latencyMs = latencyMs,
+                            isDirect = isDirect,
+                            isClosed = isClosed,
+                            tunnelType = tunnelType,
+                            rxBytes = rxBytes,
+                            txBytes = txBytes
+                        ))
+                    }
+                }
+
+                val meshCidrs = collectMeshCidrs()
+
+                MeshStatus(
+                    running = running,
+                    virtualIp = virtualIp,
+                    hostname = localHostname,
+                    peers = peers,
+                    meshCidrs = meshCidrs,
+                    errorMsg = errorMsg
+                )
+            } catch (e: Throwable) {
+                log("W", "Failed to get peer status", e)
+                null
             }
         }
     }
