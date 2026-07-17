@@ -1,0 +1,18 @@
+<resources>
+
+    <!--
+      Material Components theme required by EasyTierSettingsActivity.
+      The host app (v2rayNG) uses a platform Material theme
+      (@android:style/Theme.Material.Light.NoActionBar) which is NOT
+      a Material Components / AppCompat descendant, so views like
+      MaterialButton, MaterialToolbar and SwitchCompat crash when
+      inflated.  This theme is applied only to EasyTierSettingsActivity
+      via the android:theme attribute in the plugin's AndroidManifest.
+    -->
+    <style name="EasyTierSettingsTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/easytier_color_primary</item>
+        <item name="colorPrimaryDark">@color/easytier_color_primary_dark</item>
+        <item name="colorAccent">@color/easytier_color_accent</item>
+    </style>
+
+</resources>
