@@ -84,4 +84,6 @@
     <string name="easytier_logs_empty">暫無日誌。啟動 v2rayNG VPN 後將開始記錄。</string>
     <string name="easytier_clear_logs">清除日誌</string>
     <string name="easytier_network_info_empty">無網路資訊。請確保 EasyTier 已啟用且 v2rayNG VPN 已連線。</string>
+    <string name="easytier_copy_to_clipboard">複製</string>
+    <string name="easytier_copied_to_clipboard">已複製到剪貼簿</string>
 </resources>
