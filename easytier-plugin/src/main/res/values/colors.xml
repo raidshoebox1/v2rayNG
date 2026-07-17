@@ -1,0 +1,8 @@
+<resources>
+
+    <!-- Colors for EasyTierSettingsTheme (Material Components requires colorPrimary etc.) -->
+    <color name="easytier_color_primary">#FF6200EE</color>
+    <color name="easytier_color_primary_dark">#FF3700B3</color>
+    <color name="easytier_color_accent">#FF03DAC5</color>
+
+</resources>
