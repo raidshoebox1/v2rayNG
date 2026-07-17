@@ -605,9 +605,10 @@ fun SettingsScreen(
                 }
             )
 
-            PreferenceGroupHeader(title = stringResource(R.string.easytier_settings_title))
+            PreferenceGroupHeader(title = stringResource(R.string.easytier_category_title))
             SettingsMenuItem(
-                title = stringResource(R.string.easytier_settings_title),
+                title = stringResource(R.string.easytier_settings_entry_title),
+                subtitle = stringResource(R.string.easytier_settings_entry_summary),
                 onClick = {
                     context.startActivity(Intent(context, EasyTierSettingsActivity::class.java))
                 }
