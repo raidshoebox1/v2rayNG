@@ -1,14 +1,17 @@
 package com.easytier.plugin.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.LocaleList
-import android.text.method.ScrollingMovementMethod
+import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -531,24 +534,12 @@ class EasyTierSettingsActivity : AppCompatActivity() {
             }
         }
 
-        val textView = TextView(this).apply {
-            text = sb.toString()
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(48, 32, 48, 32)
-            movementMethod = ScrollingMovementMethod.getInstance()
-            isVerticalScrollBarEnabled = true
-            setHorizontallyScrolling(true)
-        }
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.easytier_pref_view_logs_title)
-            .setView(textView)
-            .setPositiveButton(android.R.string.ok, null)
-            .setNegativeButton(R.string.easytier_clear_logs) { _, _ ->
-                EasyTierPlugin.clearLogs()
-            }
-            .show()
+        showTextDialog(
+            title = getString(R.string.easytier_pref_view_logs_title),
+            text = sb.toString(),
+            negativeLabel = getString(R.string.easytier_clear_logs),
+            negativeAction = { EasyTierPlugin.clearLogs() }
+        )
     }
 
     private fun showNetworkInfoDialog() {
@@ -569,20 +560,67 @@ class EasyTierSettingsActivity : AppCompatActivity() {
             }
         }
 
-        val textView = TextView(this).apply {
-            text = displayText
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(48, 32, 48, 32)
-            movementMethod = ScrollingMovementMethod.getInstance()
-            isVerticalScrollBarEnabled = true
-            setHorizontallyScrolling(true)
+        showTextDialog(
+            title = getString(R.string.easytier_pref_network_info_title),
+            text = displayText,
+            negativeLabel = null,
+            negativeAction = null
+        )
+    }
+
+    /**
+     * Show a scrollable, selectable text dialog with a Copy button.
+     *
+     * Uses a ScrollView + TextView layout (dialog_easytier_text.xml) that
+     * wraps long lines automatically (no horizontal scrolling), supports
+     * text selection/copy, and limits the dialog height to ~60% of the
+     * screen so it doesn't overflow.
+     *
+     * @param title       Dialog title
+     * @param text        Text content to display
+     * @param negativeLabel  Label for the negative button (e.g. "Clear Logs"),
+     *                       or null to hide the negative button
+     * @param negativeAction  Action to perform when the negative button is clicked
+     */
+    private fun showTextDialog(
+        title: String,
+        text: String,
+        negativeLabel: String?,
+        negativeAction: (() -> Unit)?
+    ) {
+        val scrollView = LayoutInflater.from(this).inflate(R.layout.dialog_easytier_text, null) as ScrollView
+        val textView = scrollView.findViewById<TextView>(R.id.tv_dialog_text)
+        textView.text = text
+
+        // Limit dialog height to ~60% of the screen so it doesn't overflow
+        val displayMetrics = resources.displayMetrics
+        val maxHeight = (displayMetrics.heightPixels * 0.6).toInt()
+        scrollView.layoutParams = ScrollView.LayoutParams(
+            ScrollView.LayoutParams.MATCH_PARENT,
+            ScrollView.LayoutParams.WRAP_CONTENT
+        )
+        scrollView.post {
+            if (scrollView.height > maxHeight) {
+                val params = scrollView.layoutParams
+                params.height = maxHeight
+                scrollView.layoutParams = params
+            }
         }
 
-        AlertDialog.Builder(this)
-            .setTitle(R.string.easytier_pref_network_info_title)
-            .setView(textView)
+        val builder = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scrollView)
             .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .setNeutralButton(R.string.easytier_copy_to_clipboard) { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText(title, text))
+                Toast.makeText(this, R.string.easytier_copied_to_clipboard, Toast.LENGTH_SHORT).show()
+            }
+
+        if (negativeLabel != null && negativeAction != null) {
+            builder.setNegativeButton(negativeLabel) { _, _ -> negativeAction() }
+        }
+
+        builder.show()
     }
 }
