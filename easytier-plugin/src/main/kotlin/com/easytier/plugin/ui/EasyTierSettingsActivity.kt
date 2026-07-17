@@ -595,10 +595,6 @@ class EasyTierSettingsActivity : AppCompatActivity() {
         // Limit dialog height to ~60% of the screen so it doesn't overflow
         val displayMetrics = resources.displayMetrics
         val maxHeight = (displayMetrics.heightPixels * 0.6).toInt()
-        scrollView.layoutParams = ScrollView.LayoutParams(
-            ScrollView.LayoutParams.MATCH_PARENT,
-            ScrollView.LayoutParams.WRAP_CONTENT
-        )
         scrollView.post {
             if (scrollView.height > maxHeight) {
                 val params = scrollView.layoutParams
