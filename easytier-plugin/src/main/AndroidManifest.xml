@@ -8,6 +8,7 @@
             android:name="com.easytier.plugin.ui.EasyTierSettingsActivity"
             android:exported="false"
             android:label="@string/easytier_settings_title"
+            android:theme="@style/EasyTierSettingsTheme"
             android:parentActivityName="com.v2ray.ang.ui.SettingsActivity" />
 
     </application>
