@@ -155,6 +155,9 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
         val backupDir = cacheDir.absolutePath + "/$folderName"
         val outputZipFilePath = "${cacheDir.absolutePath}/$folderName.zip"
 
+        // Ensure backup directory exists before MMKV backup (MMKV may not create it)
+        File(backupDir).mkdirs()
+
         val count = MMKV.backupAllToDirectory(backupDir)
         if (count <= 0) {
             return Pair(false, "")
@@ -164,6 +167,7 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
         try {
             val easyTierJson = EasyTierSettingsManager.exportToJson(app)
             File(backupDir, "easytier_settings.json").writeText(easyTierJson.toString())
+            LogUtil.d(AppConfig.TAG, "EasyTier settings backed up successfully")
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to backup EasyTier settings", e)
         }
@@ -192,6 +196,9 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
             if (easyTierFile.exists()) {
                 val json = JsonParser.parseString(easyTierFile.readText()).asJsonObject
                 EasyTierSettingsManager.importFromJson(app, json)
+                LogUtil.d(AppConfig.TAG, "EasyTier settings restored successfully")
+            } else {
+                LogUtil.d(AppConfig.TAG, "No EasyTier settings found in backup (old backup format)")
             }
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to restore EasyTier settings", e)
