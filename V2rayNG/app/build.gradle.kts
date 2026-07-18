@@ -9,6 +9,16 @@ android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            storeType = "PKCS12"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.v2ray.ang"
         minSdk = 24

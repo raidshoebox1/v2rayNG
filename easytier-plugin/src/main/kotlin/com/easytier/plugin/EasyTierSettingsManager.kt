@@ -360,4 +360,64 @@ object EasyTierSettingsManager {
             logLevel = logLevel,
         )
     }
+
+    // ------------------------------------------------------------------
+    // Backup / Restore
+    // ------------------------------------------------------------------
+
+    /**
+     * Export all EasyTier settings (including the network secret in plaintext)
+     * to a [JsonObject] suitable for inclusion in v2rayNG's backup ZIP.
+     *
+     * The network secret is included in plaintext so that it survives a
+     * backup → uninstall → install → restore cycle, where the signing key
+     * (and thus the Android Keystore key used by EncryptedSharedPreferences)
+     * may have changed.  [importFromJson] re-encrypts the secret on restore.
+     */
+    fun exportToJson(context: Context): JsonObject {
+        val ctx = context.applicationContext
+        return JsonObject().apply {
+            addProperty(KEY_ENABLED, isEnabled(ctx))
+            addProperty(KEY_HOSTNAME, getHostname(ctx) ?: "")
+            addProperty(KEY_NETWORK_NAME, getNetworkName(ctx))
+            addProperty(KEY_NETWORK_SECRET, getNetworkSecret(ctx))
+            addProperty(KEY_VIRTUAL_IP, getVirtualIp(ctx) ?: "")
+            addProperty(KEY_PEERS, getPeers(ctx).joinToString(","))
+            addProperty(KEY_SOCKS5_PORT, getSocks5Port(ctx))
+            addProperty(KEY_LOG_ENABLED, isLogEnabled(ctx))
+            addProperty(KEY_MTU, getMtu(ctx) ?: "")
+            addProperty(KEY_LOG_LEVEL, getLogLevel(ctx))
+        }
+    }
+
+    /**
+     * Import EasyTier settings from a [JsonObject] previously produced by
+     * [exportToJson].  Writes through the regular setters (which also update
+     * the cross-process snapshot file) and re-encrypts the network secret via
+     * the current signing key's Keystore.  Missing keys are silently skipped
+     * so a partial or older-format backup does not corrupt current settings.
+     */
+    fun importFromJson(context: Context, json: JsonObject) {
+        val ctx = context.applicationContext
+        if (json.has(KEY_ENABLED)) setEnabled(ctx, json.get(KEY_ENABLED).asBoolean)
+        if (json.has(KEY_HOSTNAME)) setHostname(ctx, json.get(KEY_HOSTNAME).asString.ifBlank { null })
+        if (json.has(KEY_NETWORK_NAME)) setNetworkName(ctx, json.get(KEY_NETWORK_NAME).asString)
+        if (json.has(KEY_NETWORK_SECRET)) setNetworkSecret(ctx, json.get(KEY_NETWORK_SECRET).asString)
+        if (json.has(KEY_VIRTUAL_IP)) setVirtualIp(ctx, json.get(KEY_VIRTUAL_IP).asString.ifBlank { null })
+        if (json.has(KEY_PEERS)) {
+            val peers = json.get(KEY_PEERS).asString.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            setPeers(ctx, peers)
+        }
+        if (json.has(KEY_SOCKS5_PORT)) {
+            val port = json.get(KEY_SOCKS5_PORT).asInt
+            if (port in 1..65535) setSocks5Port(ctx, port)
+        }
+        if (json.has(KEY_LOG_ENABLED)) setLogEnabled(ctx, json.get(KEY_LOG_ENABLED).asBoolean)
+        if (json.has(KEY_MTU)) {
+            val mtuStr = json.get(KEY_MTU).asString
+            setMtu(ctx, mtuStr.toIntOrNull())
+        }
+        if (json.has(KEY_LOG_LEVEL)) setLogLevel(ctx, json.get(KEY_LOG_LEVEL).asString)
+        flushSnapshot(ctx)
+    }
 }

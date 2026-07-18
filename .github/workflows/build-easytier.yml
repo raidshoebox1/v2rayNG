@@ -334,6 +334,13 @@ jobs:
             ## EasyTier submodule
             Pinned to EasyTier/EasyTier (see submodule reference in repo)
 
+            ## Migration from older builds
+            If you have an older build installed (from before this release), you must
+            uninstall it before installing this version because the APK signing key has
+            changed. Use Settings → Backup to save your v2rayNG config first — EasyTier
+            settings are now included in the backup. After uninstalling and installing
+            the new APK, use Settings → Backup → Restore to restore all settings.
+
             > This is a draft release. Review and publish when ready.
           draft: true
           prerelease: false
