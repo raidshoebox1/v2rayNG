@@ -17,8 +17,6 @@ core = "3.5.4"
 workRuntimeKtx = "2.11.2"
 lifecycleViewmodelKtx = "2.11.0"
 mockitoMockitoInline = "5.2.0"
-appcompat = "1.7.1"
-material = "1.13.0"
 camerax = "1.6.1"
 composeBom = "2026.06.01"
 reorderable = "3.1.0"
@@ -64,9 +62,6 @@ lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-com
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
 
 # EasyTier plugin dependencies
-androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
-preference-ktx = { module = "androidx.preference:preference-ktx", version.ref = "preferenceKtx" }
 androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
