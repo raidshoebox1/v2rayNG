@@ -13,6 +13,8 @@ import com.v2ray.ang.ui.base.BaseViewModel
 import com.v2ray.ang.ui.base.ViewModelEvent
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.ZipUtil
+import com.easytier.plugin.EasyTierSettingsManager
+import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -178,6 +180,14 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
             return Pair(false, "")
         }
 
+        // Also back up EasyTier settings (SharedPreferences + encrypted secret + snapshot)
+        try {
+            val easyTierJson = EasyTierSettingsManager.exportToJson(app)
+            File(backupDir, "easytier_settings.json").writeText(easyTierJson.toString())
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to backup EasyTier settings", e)
+        }
+
         return if (ZipUtil.zipFromFolder(backupDir, outputZipFilePath)) {
             Pair(true, outputZipFilePath)
         } else {
@@ -196,9 +206,21 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
                 val count = MMKV.restoreAllFromDirectory(backupDir.absolutePath)
                 SettingsChangeManager.makeSetupGroupTab()
                 SettingsChangeManager.makeRestartService()
+
+                // Also restore EasyTier settings if present in the backup
+                try {
+                    val easyTierFile = File(backupDir, "easytier_settings.json")
+                    if (easyTierFile.exists()) {
+                        val json = JsonParser.parseString(easyTierFile.readText()).asJsonObject
+                        EasyTierSettingsManager.importFromJson(app, json)
+                    }
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "Failed to restore EasyTier settings", e)
+                }
+
                 count > 0
             } finally {
                 backupDir.deleteRecursively()
             }
         }
-}
+
