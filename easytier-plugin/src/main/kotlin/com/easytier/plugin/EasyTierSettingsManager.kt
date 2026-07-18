@@ -376,7 +376,7 @@ object EasyTierSettingsManager {
      */
     fun exportToJson(context: Context): JsonObject {
         val ctx = context.applicationContext
-        return JsonObject().apply {
+        val json = JsonObject().apply {
             addProperty(KEY_ENABLED, isEnabled(ctx))
             addProperty(KEY_HOSTNAME, getHostname(ctx) ?: "")
             addProperty(KEY_NETWORK_NAME, getNetworkName(ctx))
@@ -388,36 +388,83 @@ object EasyTierSettingsManager {
             addProperty(KEY_MTU, getMtu(ctx)?.toString() ?: "")
             addProperty(KEY_LOG_LEVEL, getLogLevel(ctx))
         }
+        Log.i(TAG, "exportToJson: $json")
+        return json
     }
 
     /**
      * Import EasyTier settings from a [JsonObject] previously produced by
-     * [exportToJson].  Writes through the regular setters (which also update
-     * the cross-process snapshot file) and re-encrypts the network secret via
-     * the current signing key's Keystore.  Missing keys are silently skipped
-     * so a partial or older-format backup does not corrupt current settings.
+     * [exportToJson].  Writes all non-secret fields to SharedPreferences in
+     * a single [commit] (synchronous disk write) and re-encrypts the network
+     * secret via [setNetworkSecret].  Missing keys are silently skipped so a
+     * partial or older-format backup does not corrupt current settings.
      */
     fun importFromJson(context: Context, json: JsonObject) {
         val ctx = context.applicationContext
-        if (json.has(KEY_ENABLED)) setEnabled(ctx, json.get(KEY_ENABLED).asBoolean)
-        if (json.has(KEY_HOSTNAME)) setHostname(ctx, json.get(KEY_HOSTNAME).asString.ifBlank { null })
-        if (json.has(KEY_NETWORK_NAME)) setNetworkName(ctx, json.get(KEY_NETWORK_NAME).asString)
-        if (json.has(KEY_NETWORK_SECRET)) setNetworkSecret(ctx, json.get(KEY_NETWORK_SECRET).asString)
-        if (json.has(KEY_VIRTUAL_IP)) setVirtualIp(ctx, json.get(KEY_VIRTUAL_IP).asString.ifBlank { null })
+        Log.i(TAG, "importFromJson: $json")
+
+        // Batch all default-SharedPreferences writes into a single editor
+        // and commit synchronously to ensure they are persisted to disk
+        // before the caller checks any values.
+        val sp = prefs(ctx)
+        val editor = sp.edit()
+        var hasAny = false
+
+        if (json.has(KEY_ENABLED)) {
+            editor.putBoolean(KEY_ENABLED, json.get(KEY_ENABLED).asBoolean)
+            hasAny = true
+        }
+        if (json.has(KEY_HOSTNAME)) {
+            editor.putString(KEY_HOSTNAME, json.get(KEY_HOSTNAME).asString.ifBlank { null })
+            hasAny = true
+        }
+        if (json.has(KEY_NETWORK_NAME)) {
+            editor.putString(KEY_NETWORK_NAME, json.get(KEY_NETWORK_NAME).asString)
+            hasAny = true
+        }
+        if (json.has(KEY_VIRTUAL_IP)) {
+            editor.putString(KEY_VIRTUAL_IP, json.get(KEY_VIRTUAL_IP).asString.ifBlank { null })
+            hasAny = true
+        }
         if (json.has(KEY_PEERS)) {
             val peers = json.get(KEY_PEERS).asString.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            setPeers(ctx, peers)
+            editor.putString(KEY_PEERS, peers.joinToString(","))
+            hasAny = true
         }
         if (json.has(KEY_SOCKS5_PORT)) {
             val port = json.get(KEY_SOCKS5_PORT).asInt
-            if (port in 1..65535) setSocks5Port(ctx, port)
+            if (port in 1..65535) {
+                editor.putString(KEY_SOCKS5_PORT, port.toString())
+                hasAny = true
+            }
         }
-        if (json.has(KEY_LOG_ENABLED)) setLogEnabled(ctx, json.get(KEY_LOG_ENABLED).asBoolean)
+        if (json.has(KEY_LOG_ENABLED)) {
+            editor.putBoolean(KEY_LOG_ENABLED, json.get(KEY_LOG_ENABLED).asBoolean)
+            hasAny = true
+        }
         if (json.has(KEY_MTU)) {
             val mtuStr = json.get(KEY_MTU).asString
-            setMtu(ctx, mtuStr.toIntOrNull())
+            editor.putString(KEY_MTU, mtuStr.toIntOrNull()?.toString())
+            hasAny = true
         }
-        if (json.has(KEY_LOG_LEVEL)) setLogLevel(ctx, json.get(KEY_LOG_LEVEL).asString)
+        if (json.has(KEY_LOG_LEVEL)) {
+            editor.putString(KEY_LOG_LEVEL, json.get(KEY_LOG_LEVEL).asString)
+            hasAny = true
+        }
+
+        if (hasAny) {
+            editor.commit()
+        }
+
+        // Network secret is stored in EncryptedSharedPreferences — write
+        // separately via setNetworkSecret, which also updates the snapshot.
+        if (json.has(KEY_NETWORK_SECRET)) {
+            setNetworkSecret(ctx, json.get(KEY_NETWORK_SECRET).asString)
+        }
+
+        // Write the cross-process snapshot file from the now-persisted
+        // SharedPreferences so the VPN service process sees the restored values.
         flushSnapshot(ctx)
+        Log.i(TAG, "importFromJson: done (hasAny=$hasAny)")
     }
 }
