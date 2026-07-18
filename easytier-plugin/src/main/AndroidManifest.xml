@@ -1,16 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <application>
-
-        <!-- EasyTier Settings Activity -->
-        <activity
-            android:name="com.easytier.plugin.ui.EasyTierSettingsActivity"
-            android:exported="false"
-            android:label="@string/easytier_settings_title"
-            android:theme="@style/EasyTierSettingsTheme"
-            android:parentActivityName="com.v2ray.ang.ui.SettingsActivity" />
-
-    </application>
+    <application />
 
 </manifest>
