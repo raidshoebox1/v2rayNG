@@ -2,8 +2,8 @@ package com.easytier.plugin
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.preference.PreferenceManager
 import android.util.Log
-import androidx.preference.PreferenceManager
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.gson.JsonObject
