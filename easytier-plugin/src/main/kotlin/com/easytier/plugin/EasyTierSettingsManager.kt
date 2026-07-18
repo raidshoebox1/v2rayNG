@@ -385,7 +385,7 @@ object EasyTierSettingsManager {
             addProperty(KEY_PEERS, getPeers(ctx).joinToString(","))
             addProperty(KEY_SOCKS5_PORT, getSocks5Port(ctx))
             addProperty(KEY_LOG_ENABLED, isLogEnabled(ctx))
-            addProperty(KEY_MTU, getMtu(ctx) ?: "")
+            addProperty(KEY_MTU, getMtu(ctx)?.toString() ?: "")
             addProperty(KEY_LOG_LEVEL, getLogLevel(ctx))
         }
     }
