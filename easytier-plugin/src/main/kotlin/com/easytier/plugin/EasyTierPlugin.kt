@@ -73,6 +73,37 @@ class EasyTierPlugin(private val context: Context) {
         )
 
         // ------------------------------------------------------------------
+        // Tuning constants (centralized for easy adjustment)
+        // ------------------------------------------------------------------
+
+        /** Status snapshot is considered stale after this many ms. */
+        const val STATUS_SNAPSHOT_TTL_MS = 30_000L
+
+        /** Mesh CIDR cache TTL — avoids repeated JNI RPC calls during a single VPN start. */
+        const val MESH_CIDR_CACHE_TTL_MS = 5_000L
+
+        /** Maximum number of log entries kept in the in-memory ring buffer. */
+        const val MAX_LOG_ENTRIES = 500
+
+        /** SOCKS5 listener readiness probe: max connection attempts. */
+        const val SOCKS5_MAX_ATTEMPTS = 5
+
+        /** SOCKS5 listener readiness probe: connect timeout per attempt (ms). */
+        const val SOCKS5_CONNECT_TIMEOUT_MS = 200
+
+        /** SOCKS5 listener readiness probe: delay between attempts (ms). */
+        const val SOCKS5_RETRY_DELAY_MS = 400L
+
+        /** Status writer thread: interval between snapshot writes (ms). */
+        const val STATUS_WRITER_INTERVAL_MS = 3_000L
+
+        /** Mesh CIDR polling: max number of poll attempts after VPN start. */
+        const val MESH_CIDR_POLL_MAX_ROUNDS = 3
+
+        /** Mesh CIDR polling: delay between poll attempts (ms). */
+        const val MESH_CIDR_POLL_INTERVAL_MS = 500L
+
+        // ------------------------------------------------------------------
         // Cross-process status snapshot
         // ------------------------------------------------------------------
 
@@ -87,13 +118,6 @@ class EasyTierPlugin(private val context: Context) {
          * (test) instance is running.
          */
         private const val STATUS_SNAPSHOT_FILE = "easytier_status.json"
-
-        /**
-         * Status snapshot is considered fresh for this long after it is
-         * written.  If the file is older than this, the VPN instance is
-         * assumed to be stopped (or the writer thread died).
-         */
-        private const val STATUS_SNAPSHOT_TTL_MS = 30_000L // 30 seconds
 
         /**
          * Check whether the EasyTier native library is available on this device.
@@ -192,7 +216,6 @@ class EasyTierPlugin(private val context: Context) {
             val message: String
         )
 
-        private const val MAX_LOG_ENTRIES = 500
         private val logBuffer = mutableListOf<LogEntry>()
 
         @Volatile
@@ -351,7 +374,6 @@ class EasyTierPlugin(private val context: Context) {
         private var meshCidrsCache: List<String>? = null
         @Volatile
         private var meshCidrsCacheTime: Long = 0L
-        private const val MESH_CIDR_CACHE_TTL_MS = 5_000L // 5 seconds
 
         @JvmStatic
         fun getMeshCidrsStatic(): List<String> {
@@ -1009,23 +1031,20 @@ class EasyTierPlugin(private val context: Context) {
      *   window, `false` if it was not ready after all attempts.
      */
     private fun waitForSocks5(port: Int): Boolean {
-        val maxAttempts = 5
-        val connectTimeoutMs = 200
-        val retryDelayMs = 400L
-        for (attempt in 1..maxAttempts) {
+        for (attempt in 1..SOCKS5_MAX_ATTEMPTS) {
             try {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", port), connectTimeoutMs)
+                    socket.connect(InetSocketAddress("127.0.0.1", port), SOCKS5_CONNECT_TIMEOUT_MS)
                 }
                 log("D", "EasyTier SOCKS5 listener ready on port $port (attempt $attempt)")
                 return true
             } catch (e: Throwable) {
-                if (attempt < maxAttempts) {
-                    Thread.sleep(retryDelayMs)
+                if (attempt < SOCKS5_MAX_ATTEMPTS) {
+                    Thread.sleep(SOCKS5_RETRY_DELAY_MS)
                 }
             }
         }
-        log("W", "EasyTier SOCKS5 listener on port $port not ready after $maxAttempts attempts")
+        log("W", "EasyTier SOCKS5 listener on port $port not ready after $SOCKS5_MAX_ATTEMPTS attempts")
         return false
     }
 
