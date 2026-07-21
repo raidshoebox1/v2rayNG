@@ -588,6 +588,7 @@ class EasyTierPlugin(private val context: Context) {
          * @return true if started successfully.
          */
         @JvmStatic
+        @Synchronized
         fun startTest(context: Context, config: EasyTierConfig): Boolean {
             // Refuse to start a test instance if the VPN service already has one running.
             // Both use the same instance name (DEFAULT_INSTANCE_NAME), so starting a second
@@ -611,6 +612,7 @@ class EasyTierPlugin(private val context: Context) {
          * Stop the test instance started from settings UI.
          */
         @JvmStatic
+        @Synchronized
         fun stopTest() {
             testInstance?.let { plugin ->
                 plugin.stop()
@@ -879,6 +881,7 @@ class EasyTierPlugin(private val context: Context) {
      *
      * @return `true` if the instance started successfully.
      */
+    @Synchronized
     fun start(config: EasyTierConfig): Boolean {
         if (running) {
             log("W", "EasyTier instance already running")
@@ -894,6 +897,17 @@ class EasyTierPlugin(private val context: Context) {
             // the same name may still be running, causing runNetworkInstance()
             // to fail with "instance already exists" and leaving the OLD config
             // active. stopAllInstances() is a no-op if no instances are running.
+            try {
+                // Diagnose stale instances before stopping them — this helps
+                // understand crash-recovery scenarios where a previous native
+                // instance survived the Java process restart.
+                val instances = EasyTierJNI.listInstances(10)
+                if (!instances.isNullOrBlank() && instances != "{}") {
+                    log("W", "EasyTier: found stale native instance(s) before start: $instances")
+                }
+            } catch (e: Throwable) {
+                // listInstances may fail on some JNI versions; non-fatal
+            }
             try {
                 EasyTierJNI.stopAllInstances()
             } catch (e: Throwable) {
@@ -937,10 +951,18 @@ class EasyTierPlugin(private val context: Context) {
             }
 
             // Wait for the SOCKS5 listener to be ready so Xray-core doesn't
-            // fail its first connection attempt.  Best-effort: if the listener
-            // isn't ready after 2s we log a warning but still return true —
-            // EasyTier may still be initialising and the listener will appear shortly.
-            waitForSocks5(config.socks5Port)
+            // fail its first connection attempt.  If the listener is not ready
+            // after all retries, we treat the start as failed and clean up.
+            if (!waitForSocks5(config.socks5Port)) {
+                log("E", "EasyTier SOCKS5 listener on port ${config.socks5Port} not ready after all retries — aborting start")
+                try {
+                    EasyTierJNI.stopAllInstances()
+                } catch (e: Throwable) {
+                    log("W", "EasyTier: failed to stop instance after SOCKS5 timeout", e)
+                }
+                setStatus("error", "SOCKS5 listener not ready on port ${config.socks5Port}")
+                return false
+            }
 
             running = true
             currentConfig = config
@@ -964,6 +986,7 @@ class EasyTierPlugin(private val context: Context) {
      * EasyTier instance (the VPN service's), and a global stop ensures
      * cleanup even if internal state is inconsistent.
      */
+    @Synchronized
     fun stop() {
         if (!running) return
         try {
@@ -982,10 +1005,10 @@ class EasyTierPlugin(private val context: Context) {
     /**
      * Best-effort check that the SOCKS5 listener is accepting connections.
      * Tries to connect to 127.0.0.1:[port] up to 5 times with 400ms delays.
-     * Logs a warning if the listener is not ready after all attempts but
-     * does NOT fail the start — EasyTier may still be initialising.
+     * @return `true` if the listener accepted a connection within the retry
+     *   window, `false` if it was not ready after all attempts.
      */
-    private fun waitForSocks5(port: Int) {
+    private fun waitForSocks5(port: Int): Boolean {
         val maxAttempts = 5
         val connectTimeoutMs = 200
         val retryDelayMs = 400L
@@ -995,14 +1018,15 @@ class EasyTierPlugin(private val context: Context) {
                     socket.connect(InetSocketAddress("127.0.0.1", port), connectTimeoutMs)
                 }
                 log("D", "EasyTier SOCKS5 listener ready on port $port (attempt $attempt)")
-                return
+                return true
             } catch (e: Throwable) {
                 if (attempt < maxAttempts) {
                     Thread.sleep(retryDelayMs)
                 }
             }
         }
-        log("W", "EasyTier SOCKS5 listener on port $port not ready after $maxAttempts attempts (non-fatal — may still be initialising)")
+        log("W", "EasyTier SOCKS5 listener on port $port not ready after $maxAttempts attempts")
+        return false
     }
 
     /** Whether the EasyTier instance is currently running. */
