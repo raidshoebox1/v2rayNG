@@ -460,8 +460,8 @@ object EasyTierSettingsManager {
         json.get(KEY_VIRTUAL_IP)?.takeIf { it.isJsonPrimitive }?.asString?.let {
             editor.putString(KEY_VIRTUAL_IP, it.ifBlank { null }); hasAny = true
         }
-        json.get(KEY_PEERS)?.takeIf { it.isJsonPrimitive }?.asString?.let {
-            val peers = it.split(",").map { p -> p.trim() }.filter { p.isNotEmpty() }
+        json.get(KEY_PEERS)?.takeIf { it.isJsonPrimitive }?.asString?.let { peersStr ->
+            val peers = peersStr.split(",").map { p -> p.trim() }.filter { it.isNotEmpty() }
             editor.putString(KEY_PEERS, peers.joinToString(",")); hasAny = true
         }
         json.get(KEY_SOCKS5_PORT)?.takeIf { it.isJsonPrimitive }?.asInt?.let { port ->
