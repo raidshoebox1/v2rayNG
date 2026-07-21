@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Full backup rules for EasyTier plugin.
+
+  Excludes the EncryptedSharedPreferences file that stores the EasyTier
+  network secret.  Even though EncryptedSharedPreferences encrypts the
+  file with a Keystore-bound key (which is not included in ADB backups),
+  excluding the file provides defense-in-depth against future changes
+  to Android's backup behavior.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="easytier_secret.xml" />
+</full-backup-content>
