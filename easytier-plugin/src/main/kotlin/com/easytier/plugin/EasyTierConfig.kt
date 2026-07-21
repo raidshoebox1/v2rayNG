@@ -112,6 +112,9 @@ data class EasyTierConfig(
     }
 
     companion object {
+        /** Default EasyTier log level. */
+        const val DEFAULT_LOG_LEVEL = "warn"
+
         /**
          * Escape a string for safe embedding in a TOML basic string.
          *
