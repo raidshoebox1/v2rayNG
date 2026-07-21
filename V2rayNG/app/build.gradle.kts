@@ -9,24 +9,24 @@ android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
 
-    // Debug signing: use a pinned keystore if available (for overlay-installable
-    // APKs that share a signature across builds). The keystore file is NOT tracked
-    // in git — provide it via the EASYTIER_DEBUG_KEYSTORE_PATH environment variable
-    // or gradle property, or place it at V2rayNG/keystore/debug.keystore locally.
-    // When absent, AGP's default debug signing is used.
-    val debugKeystorePath = (properties["easytierDebugKeystorePath"] as? String)
-        ?: System.getenv("EASYTIER_DEBUG_KEYSTORE_PATH")
-    val debugKeystoreFile = debugKeystorePath?.let { file(it) }
-        ?: rootProject.file("keystore/debug.keystore")
-    if (debugKeystoreFile.exists()) {
-        signingConfigs {
-            getByName("debug") {
-                storeFile = debugKeystoreFile
-                storePassword = System.getenv("EASYTIER_DEBUG_STORE_PASSWORD") ?: "android"
-                keyAlias = System.getenv("EASYTIER_DEBUG_KEY_ALIAS") ?: "androiddebugkey"
-                keyPassword = System.getenv("EASYTIER_DEBUG_KEY_PASSWORD") ?: "android"
-                storeType = "PKCS12"
-            }
+    // Debug signing: use a pinned keystore so all builds (CI + local)
+    // share the same signing key. This allows overlay installs
+    // (adb install -r) to preserve app data across upgrades, which is
+    // critical because EasyTier settings are backed up alongside v2rayNG's
+    // MMKV data and a signing-key change forces a full uninstall.
+    //
+    // The pinned keystore is committed at V2rayNG/keystore/debug.keystore
+    // (standard Android debug key: alias=androiddebugkey, password=android).
+    // CI or local developers may override the path and credentials via
+    // environment variables if a different key is needed for testing.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = System.getenv("EASYTIER_DEBUG_KEYSTORE_PATH")?.let { file(it) }
+                ?: rootProject.file("keystore/debug.keystore")
+            storePassword = System.getenv("EASYTIER_DEBUG_STORE_PASSWORD") ?: "android"
+            keyAlias = System.getenv("EASYTIER_DEBUG_KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("EASYTIER_DEBUG_KEY_PASSWORD") ?: "android"
+            storeType = "PKCS12"
         }
     }
 
