@@ -446,7 +446,7 @@ object CoreServiceManager {
                     EasyTierPlugin.log("W", "EasyTier: status writer failed (non-fatal)", e)
                 }
                 try {
-                    Thread.sleep(3000)
+                    Thread.sleep(EasyTierPlugin.STATUS_WRITER_INTERVAL_MS)
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
                     break
@@ -488,16 +488,16 @@ object CoreServiceManager {
     private fun pollMeshCidrs() {
         if (easyTierPlugin == null) return  // EasyTier not enabled or failed to start
         try {
-            for (attempt in 1..3) {
+            for (attempt in 1..EasyTierPlugin.MESH_CIDR_POLL_MAX_ROUNDS) {
                 EasyTierPlugin.clearMeshCidrsCache()
                 val cidrs = EasyTierPlugin.getMeshCidrsStatic()
                 if (cidrs.isNotEmpty()) {
                     EasyTierPlugin.log("I", "EasyTier: mesh CIDRs available after $attempt poll(s): $cidrs")
                     return
                 }
-                if (attempt < 3) Thread.sleep(500)
+                if (attempt < EasyTierPlugin.MESH_CIDR_POLL_MAX_ROUNDS) Thread.sleep(EasyTierPlugin.MESH_CIDR_POLL_INTERVAL_MS)
             }
-            EasyTierPlugin.log("D", "EasyTier: no mesh CIDRs after 3 polls (peers may not have converged yet)")
+            EasyTierPlugin.log("D", "EasyTier: no mesh CIDRs after ${EasyTierPlugin.MESH_CIDR_POLL_MAX_ROUNDS} polls (peers may not have converged yet)")
         } catch (e: Throwable) {
             EasyTierPlugin.log("W", "EasyTier: mesh CIDR poll failed (non-fatal)", e)
         }
