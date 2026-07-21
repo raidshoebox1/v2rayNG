@@ -242,6 +242,13 @@ object CoreServiceManager {
         } catch (e: Exception) {
             val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: $message", e)
+            // If EasyTier was started but Xray-core failed to start, clean up
+            // EasyTier to avoid a stale native instance lingering without Xray.
+            try {
+                stopEasyTier(service)
+            } catch (cleanupErr: Exception) {
+                LogUtil.e(AppConfig.TAG, "StartCore-Manager: failed to stop EasyTier after core start failure", cleanupErr)
+            }
             MessageUtil.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
             NotificationManager.cancelNotification()
             return false
@@ -384,8 +391,16 @@ object CoreServiceManager {
             if (started) {
                 easyTierPlugin = plugin
                 EasyTierPlugin.log("I", "EasyTier: plugin started successfully (network=${etConfig.networkName}, socks5=${etConfig.socks5Port})")
-                // Start the status writer so the Settings UI can display live status
-                startStatusWriter(context)
+                // Start the status writer so the Settings UI can display live status.
+                // Wrap in try-catch so a failure here does not leave the plugin
+                // running without a way to stop it later.
+                try {
+                    startStatusWriter(context)
+                } catch (e: Throwable) {
+                    EasyTierPlugin.log("E", "EasyTier: failed to start status writer, stopping plugin", e)
+                    plugin.stop()
+                    easyTierPlugin = null
+                }
             } else {
                 EasyTierPlugin.log("E", "EasyTier: plugin failed to start (status=${EasyTierPlugin.getStatus()}, error=${EasyTierPlugin.getLastError()})")
             }

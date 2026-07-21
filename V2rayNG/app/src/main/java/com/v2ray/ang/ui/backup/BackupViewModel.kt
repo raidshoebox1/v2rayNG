@@ -14,6 +14,7 @@ import com.v2ray.ang.ui.base.ViewModelEvent
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.ZipUtil
 import com.easytier.plugin.EasyTierSettingsManager
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -190,18 +191,36 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
         SettingsChangeManager.makeSetupGroupTab()
         SettingsChangeManager.makeRestartService()
 
-        // Also restore EasyTier settings if present in the backup
-        try {
-            val easyTierFile = File(backupDir, "easytier_settings.json")
-            if (easyTierFile.exists()) {
+        // Also restore EasyTier settings if present in the backup.
+        // Atomicity: if EasyTier restore fails, roll back to the previous
+        // settings so the app is not left in a half-restored state.
+        val easyTierFile = File(backupDir, "easytier_settings.json")
+        if (easyTierFile.exists()) {
+            // Snapshot current EasyTier settings before overwriting
+            val previousSettings: JsonObject? = try {
+                EasyTierSettingsManager.exportToJson(myApp)
+            } catch (e: Exception) {
+                LogUtil.w(AppConfig.TAG, "Could not snapshot EasyTier settings for rollback: ${e.message}")
+                null
+            }
+
+            try {
                 val json = JsonParser.parseString(easyTierFile.readText()).asJsonObject
                 EasyTierSettingsManager.importFromJson(app, json)
                 LogUtil.d(AppConfig.TAG, "EasyTier settings restored successfully")
-            } else {
-                LogUtil.d(AppConfig.TAG, "No EasyTier settings found in backup (old backup format)")
+            } catch (e: Exception) {
+                LogUtil.e(AppConfig.TAG, "Failed to restore EasyTier settings, rolling back", e)
+                if (previousSettings != null) {
+                    try {
+                        EasyTierSettingsManager.importFromJson(myApp, previousSettings)
+                        LogUtil.d(AppConfig.TAG, "EasyTier settings rolled back to previous state")
+                    } catch (rollbackErr: Exception) {
+                        LogUtil.e(AppConfig.TAG, "Rollback of EasyTier settings failed", rollbackErr)
+                    }
+                }
             }
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to restore EasyTier settings", e)
+        } else {
+            LogUtil.d(AppConfig.TAG, "No EasyTier settings found in backup (old backup format)")
         }
 
         return count > 0
