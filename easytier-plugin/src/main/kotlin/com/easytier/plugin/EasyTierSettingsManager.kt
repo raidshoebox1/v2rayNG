@@ -263,20 +263,26 @@ object EasyTierSettingsManager {
 
     // ------------------------------------------------------------------
     // Setters — write to SharedPreferences AND snapshot file
+    //
+    // SharedPreferences writes use commit() (synchronous) rather than
+    // apply() (async) so that the snapshot file — which is written
+    // immediately after — always reflects the persisted state.  This
+    // avoids a window where the snapshot contains newer data than the
+    // SharedPreferences file (which the VPN process may read directly).
     // ------------------------------------------------------------------
 
     fun setEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).commit()
         writeSnapshot(context)
     }
 
     fun setHostname(context: Context, hostname: String?) {
-        prefs(context).edit().putString(KEY_HOSTNAME, hostname).apply()
+        prefs(context).edit().putString(KEY_HOSTNAME, hostname).commit()
         writeSnapshot(context)
     }
 
     fun setNetworkName(context: Context, name: String) {
-        prefs(context).edit().putString(KEY_NETWORK_NAME, name).apply()
+        prefs(context).edit().putString(KEY_NETWORK_NAME, name).commit()
         writeSnapshot(context)
     }
 
@@ -286,39 +292,39 @@ object EasyTierSettingsManager {
             Log.e(TAG, "Cannot persist network secret: encrypted store unavailable")
             return
         }
-        sp.edit().putString(KEY_NETWORK_SECRET, secret).apply()
-        writeSnapshot(context)
+        sp.edit().putString(KEY_NETWORK_SECRET, secret).commit()
+        // No writeSnapshot() — secret is intentionally excluded from the snapshot file.
     }
 
     fun setVirtualIp(context: Context, ip: String?) {
-        prefs(context).edit().putString(KEY_VIRTUAL_IP, ip).apply()
+        prefs(context).edit().putString(KEY_VIRTUAL_IP, ip).commit()
         writeSnapshot(context)
     }
 
     fun setPeers(context: Context, peers: List<String>) {
-        prefs(context).edit().putString(KEY_PEERS, peers.joinToString(",")).apply()
+        prefs(context).edit().putString(KEY_PEERS, peers.joinToString(",")).commit()
         writeSnapshot(context)
     }
 
     fun setSocks5Port(context: Context, port: Int) {
         if (port in 1..65535) {
-            prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).apply()
+            prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).commit()
             writeSnapshot(context)
         }
     }
 
     fun setLogEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_LOG_ENABLED, enabled).apply()
+        prefs(context).edit().putBoolean(KEY_LOG_ENABLED, enabled).commit()
         writeSnapshot(context)
     }
 
     fun setMtu(context: Context, mtu: Int?) {
-        prefs(context).edit().putString(KEY_MTU, mtu?.toString()).apply()
+        prefs(context).edit().putString(KEY_MTU, mtu?.toString()).commit()
         writeSnapshot(context)
     }
 
     fun setLogLevel(context: Context, level: String) {
-        prefs(context).edit().putString(KEY_LOG_LEVEL, level).apply()
+        prefs(context).edit().putString(KEY_LOG_LEVEL, level).commit()
         writeSnapshot(context)
     }
 
