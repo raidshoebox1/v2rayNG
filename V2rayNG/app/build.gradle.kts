@@ -9,13 +9,24 @@ android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
 
-    signingConfigs {
-        getByName("debug") {
-            storeFile = rootProject.file("keystore/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-            storeType = "PKCS12"
+    // Debug signing: use a pinned keystore if available (for overlay-installable
+    // APKs that share a signature across builds). The keystore file is NOT tracked
+    // in git — provide it via the EASYTIER_DEBUG_KEYSTORE_PATH environment variable
+    // or gradle property, or place it at V2rayNG/keystore/debug.keystore locally.
+    // When absent, AGP's default debug signing is used.
+    val debugKeystorePath = (properties["easytierDebugKeystorePath"] as? String)
+        ?: System.getenv("EASYTIER_DEBUG_KEYSTORE_PATH")
+    val debugKeystoreFile = debugKeystorePath?.let { file(it) }
+        ?: rootProject.file("keystore/debug.keystore")
+    if (debugKeystoreFile.exists()) {
+        signingConfigs {
+            getByName("debug") {
+                storeFile = debugKeystoreFile
+                storePassword = System.getenv("EASYTIER_DEBUG_STORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("EASYTIER_DEBUG_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("EASYTIER_DEBUG_KEY_PASSWORD") ?: "android"
+                storeType = "PKCS12"
+            }
         }
     }
 
