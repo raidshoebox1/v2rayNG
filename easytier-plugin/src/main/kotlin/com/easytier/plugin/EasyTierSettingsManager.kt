@@ -77,9 +77,13 @@ object EasyTierSettingsManager {
         File(context.applicationContext.filesDir, SNAPSHOT_FILE)
 
     /**
-     * Write a JSON snapshot of all settings to the snapshot file.
+     * Write a JSON snapshot of all non-secret settings to the snapshot file.
      * Called by every setter so the service process always sees the
      * latest values when it reads from the file.
+     *
+     * The network secret is intentionally excluded from the snapshot —
+     * it lives only in [EncryptedSharedPreferences] so that no plaintext
+     * copy of it ever reaches the filesystem.
      */
     private fun writeSnapshot(context: Context) {
         try {
@@ -95,8 +99,6 @@ object EasyTierSettingsManager {
                 addProperty(KEY_MTU, sp.getString(KEY_MTU, null) ?: "")
                 addProperty(KEY_LOG_LEVEL, sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
             }
-            // Network secret from EncryptedSharedPreferences
-            json.addProperty(KEY_NETWORK_SECRET, secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: "")
             val file = snapshotFile(context)
             val tmp = File(file.parentFile, "$SNAPSHOT_FILE.tmp")
             tmp.writeText(json.toString())
@@ -129,15 +131,19 @@ object EasyTierSettingsManager {
 
     /**
      * Lazily-created encrypted SharedPreferences for the network secret.
-     * Falls back to plaintext prefs if EncryptedSharedPreferences fails
-     * (e.g. on a corrupted keystore), so the app never crashes on read.
+     *
+     * Returns `null` if EncryptedSharedPreferences cannot be created (e.g.
+     * on a corrupted keystore).  In that case callers treat the secret as
+     * empty/unavailable — we never fall back to plaintext storage, because
+     * silently downgrading the network secret to plaintext would expose it
+     * to anyone with read access to the app's SharedPreferences XML.
      */
     @Volatile
     private var secretPrefs: SharedPreferences? = null
     @Volatile
     private var secretMigrationDone = false
 
-    private fun secretPrefs(context: Context): SharedPreferences {
+    private fun secretPrefs(context: Context): SharedPreferences? {
         secretPrefs?.let { return it }
         return try {
             val masterKey = MasterKey.Builder(context.applicationContext)
@@ -154,12 +160,17 @@ object EasyTierSettingsManager {
             migrateSecretIfNeeded(context, sp)
             sp
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to create EncryptedSharedPreferences, falling back to plaintext", e)
-            val fallback = prefs(context)
-            secretPrefs = fallback
-            fallback
+            Log.e(TAG, "Failed to create EncryptedSharedPreferences; secret storage unavailable", e)
+            null
         }
     }
+
+    /**
+     * Whether the encrypted secret store is available.  When `false`,
+     * [getNetworkSecret] returns an empty string and [setNetworkSecret]
+     * is a no-op.  The UI should check this and warn the user.
+     */
+    fun isSecretStoreAvailable(context: Context): Boolean = secretPrefs(context) != null
 
     /**
      * One-time migration: move the network secret from plaintext default prefs
@@ -207,8 +218,12 @@ object EasyTierSettingsManager {
     }
 
     fun getNetworkSecret(context: Context): String {
-        val snap = readSnapshot(context)
-        return snap?.get(KEY_NETWORK_SECRET)?.asString ?: (secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: "")
+        // The network secret is NEVER stored in the cross-process snapshot
+        // file.  It lives only in EncryptedSharedPreferences, which is backed
+        // by an encrypted XML file on disk.  The VPN service process reads
+        // this file fresh on first access (SharedPreferences are cached per
+        // process, and the VPN process has not cached it yet at start time).
+        return secretPrefs(context)?.getString(KEY_NETWORK_SECRET, "") ?: ""
     }
 
     fun getVirtualIp(context: Context): String? {
@@ -266,7 +281,12 @@ object EasyTierSettingsManager {
     }
 
     fun setNetworkSecret(context: Context, secret: String) {
-        secretPrefs(context).edit().putString(KEY_NETWORK_SECRET, secret).apply()
+        val sp = secretPrefs(context)
+        if (sp == null) {
+            Log.e(TAG, "Cannot persist network secret: encrypted store unavailable")
+            return
+        }
+        sp.edit().putString(KEY_NETWORK_SECRET, secret).apply()
         writeSnapshot(context)
     }
 
@@ -337,7 +357,7 @@ object EasyTierSettingsManager {
         if (networkName.isBlank()) return null
 
         val hostname = (snap?.get(KEY_HOSTNAME)?.asString ?: sp.getString(KEY_HOSTNAME, null))?.takeIf { it.isNotBlank() }
-        val networkSecret = snap?.get(KEY_NETWORK_SECRET)?.asString ?: (secretPrefs(context).getString(KEY_NETWORK_SECRET, "") ?: "")
+        val networkSecret = secretPrefs(context)?.getString(KEY_NETWORK_SECRET, "") ?: ""
         val virtualIp = (snap?.get(KEY_VIRTUAL_IP)?.asString ?: sp.getString(KEY_VIRTUAL_IP, null))?.takeIf { it.isNotBlank() }
         val peersRaw = snap?.get(KEY_PEERS)?.asString ?: sp.getString(KEY_PEERS, "")
         val peers = peersRaw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
@@ -388,7 +408,7 @@ object EasyTierSettingsManager {
             addProperty(KEY_MTU, getMtu(ctx)?.toString() ?: "")
             addProperty(KEY_LOG_LEVEL, getLogLevel(ctx))
         }
-        Log.i(TAG, "exportToJson: $json")
+        Log.i(TAG, "exportToJson: exported ${json.size()} keys")
         return json
     }
 
@@ -401,7 +421,7 @@ object EasyTierSettingsManager {
      */
     fun importFromJson(context: Context, json: JsonObject) {
         val ctx = context.applicationContext
-        Log.i(TAG, "importFromJson: $json")
+        Log.i(TAG, "importFromJson: received ${json.size()} keys")
 
         // Batch all default-SharedPreferences writes into a single editor
         // and commit synchronously to ensure they are persisted to disk
