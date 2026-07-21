@@ -1,7 +1,9 @@
 # Ignore data and key store files
 *.dat
 *.jks
-*.keystore
+# Note: *.keystore is NOT ignored — V2rayNG/keystore/debug.keystore is
+# intentionally tracked so all CI/local builds share the same signing key,
+# allowing overlay installs (adb install -r) to preserve app data.
 
 # Ignore output JSON file
 V2rayNG/app/release/output.json
