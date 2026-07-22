@@ -330,10 +330,11 @@ class EasyTierPlugin(private val context: Context) {
          * leaking sensitive information (peer URIs, network secrets, mesh CIDRs)
          * via a world-readable logcat on rooted devices or ADB.
          *
-         * Credentials embedded in peer URIs (e.g. `tcp://user:pass@host:port`)
-         * are redacted to `tcp://***@host:port` before the message is stored
-         * in the log buffer or written to logcat, so they do not appear in the
-         * in-app log viewer or in logcat output at any level.
+         * Credentials embedded in peer URIs (e.g. tcp://user:pass@host:port)
+         * are redacted (the user:pass segment is replaced with ***) before
+         * the message is stored in the log buffer or written to logcat, so
+         * they do not appear in the in-app log viewer or in logcat output
+         * at any level.
          *
          * Called from both EasyTierPlugin instance methods and CoreServiceManager.
          */
@@ -368,7 +369,7 @@ class EasyTierPlugin(private val context: Context) {
          * after `://`, so plain `host:port` URIs without credentials are
          * left untouched.
          */
-        private val credentialPattern = Regex("""://[^\s/@:]+:[^\s/@]+@""")
+        private val credentialPattern = Regex("://[^\\s/@:]+:[^\\s/@]+@")
 
         private fun redactCredentials(message: String): String {
             return credentialPattern.replace(message, "://***@")
