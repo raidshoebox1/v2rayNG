@@ -564,12 +564,28 @@ private val peerSchemes = setOf("tcp", "udp", "ws", "wss", "wg", "ring")
 /**
  * Validate a peer URI.  Accepts schemes: tcp://, udp://, ws://, wss://, wg://, ring://.
  * Also accepts plain `host:port` (treated as TCP by EasyTier).
+ *
+ * Rejects empty URIs, URIs with whitespace, and scheme-prefixed URIs that
+ * have no host part after `://`.
  */
 private fun isValidPeerUri(uri: String): Boolean {
-    val scheme = uri.substringBefore("://", "")
-    if (scheme.isNotEmpty()) return scheme.lowercase() in peerSchemes
-    // Plain host:port — accept if it looks like host:port or a valid hostname
-    return uri.contains(":") || uri.contains(".")
+    val trimmed = uri.trim()
+    if (trimmed.isEmpty()) return false
+    // Reject any whitespace (would break TOML serialization or cause parse errors)
+    if (trimmed.any { it.isWhitespace() }) return false
+    val scheme = trimmed.substringBefore("://", "")
+    if (scheme.isNotEmpty()) {
+        if (scheme.lowercase() !in peerSchemes) return false
+        // Ensure there is a non-empty host part after the scheme
+        val rest = trimmed.substringAfter("://")
+        if (rest.isBlank()) return false
+        // Reject if the host part is empty or starts with a path separator
+        val hostPart = rest.substringBefore("/")
+        if (hostPart.isBlank()) return false
+        return true
+    }
+    // Plain host:port or hostname — require at least a colon or dot
+    return trimmed.contains(":") || trimmed.contains(".")
 }
 
 /**

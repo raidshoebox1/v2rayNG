@@ -406,6 +406,15 @@ object EasyTierSettingsManager {
      * (and thus the Android Keystore key used by EncryptedSharedPreferences)
      * may have changed.  [importFromJson] re-encrypts the secret on restore.
      *
+     * **Security note:** Peer URIs (the `easytier_peers` field) may contain
+     * embedded credentials (e.g. `tcp://user:pass@host:port`).  These are
+     * stored in plaintext in the backup JSON, at the same security level as
+     * v2rayNG's own server settings.  The backup ZIP should be protected by
+     * a strong password and not shared or transmitted over insecure channels.
+     * The cross-process snapshot file (`easytier_config.json`) and status
+     * snapshot file (`easytier_status.json`) are excluded from ADB backups
+     * via `easytier_backup_rules.xml`.
+     *
      * The JSON includes a `__version` field for forward-compatible migration.
      */
     fun exportToJson(context: Context): JsonObject {
