@@ -198,7 +198,7 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
         if (easyTierFile.exists()) {
             // Snapshot current EasyTier settings before overwriting
             val previousSettings: JsonObject? = try {
-                EasyTierSettingsManager.exportToJson(myApp)
+                EasyTierSettingsManager.exportToJson(app)
             } catch (e: Exception) {
                 LogUtil.w(AppConfig.TAG, "Could not snapshot EasyTier settings for rollback: ${e.message}")
                 null
@@ -212,7 +212,7 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
                 LogUtil.e(AppConfig.TAG, "Failed to restore EasyTier settings, rolling back", e)
                 if (previousSettings != null) {
                     try {
-                        EasyTierSettingsManager.importFromJson(myApp, previousSettings)
+                        EasyTierSettingsManager.importFromJson(app, previousSettings)
                         LogUtil.d(AppConfig.TAG, "EasyTier settings rolled back to previous state")
                     } catch (rollbackErr: Exception) {
                         LogUtil.e(AppConfig.TAG, "Rollback of EasyTier settings failed", rollbackErr)
