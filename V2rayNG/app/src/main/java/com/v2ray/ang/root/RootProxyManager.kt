@@ -214,8 +214,8 @@ object RootProxyManager {
             appendLine("  address: '${AppConfig.LOOPBACK}'")
             appendLine("  udp: 'udp'")
             if (socksUsername != null && socksPassword != null) {
-                appendLine("  username: '$socksUsername'")
-                appendLine("  password: '$socksPassword'")
+                appendLine("  username: '${socksUsername.replace("'", "''")}'")
+                appendLine("  password: '${socksPassword.replace("'", "''")}'")
             }
             appendLine("  tcp-fastopen: true")
         }
