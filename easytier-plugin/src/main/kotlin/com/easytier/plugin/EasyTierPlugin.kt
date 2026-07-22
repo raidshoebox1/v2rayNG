@@ -330,15 +330,21 @@ class EasyTierPlugin(private val context: Context) {
          * leaking sensitive information (peer URIs, network secrets, mesh CIDRs)
          * via a world-readable logcat on rooted devices or ADB.
          *
+         * Credentials embedded in peer URIs (e.g. `tcp://user:pass@host:port`)
+         * are redacted to `tcp://***@host:port` before the message is stored
+         * in the log buffer or written to logcat, so they do not appear in the
+         * in-app log viewer or in logcat output at any level.
+         *
          * Called from both EasyTierPlugin instance methods and CoreServiceManager.
          */
         @JvmStatic
         fun log(level: String, message: String, throwable: Throwable? = null) {
-            val msg = if (throwable != null) {
+            val raw = if (throwable != null) {
                 "$message: ${throwable.javaClass.simpleName}: ${throwable.message}"
             } else {
                 message
             }
+            val msg = redactCredentials(raw)
             val entry = LogEntry(System.currentTimeMillis(), level, msg)
             synchronized(logBuffer) {
                 logBuffer.add(entry)
@@ -346,11 +352,26 @@ class EasyTierPlugin(private val context: Context) {
             }
             // In release builds suppress I/D logs from logcat to reduce info leakage.
             when (level) {
-                "E" -> Log.e(TAG, message, throwable)
-                "W" -> Log.w(TAG, message, throwable)
-                "I" -> if (BuildConfig.DEBUG) Log.i(TAG, message)
-                "D" -> if (BuildConfig.DEBUG) Log.d(TAG, message)
+                "E" -> Log.e(TAG, msg, throwable)
+                "W" -> Log.w(TAG, msg, throwable)
+                "I" -> if (BuildConfig.DEBUG) Log.i(TAG, msg)
+                "D" -> if (BuildConfig.DEBUG) Log.d(TAG, msg)
             }
+        }
+
+        /**
+         * Redact credentials from URIs in log messages.
+         *
+         * Matches patterns like `scheme://user:pass@host` and replaces the
+         * `user:pass@` part with `***@`.  Handles multiple URIs in a single
+         * message.  Only matches when both a colon and an at-sign are present
+         * after `://`, so plain `host:port` URIs without credentials are
+         * left untouched.
+         */
+        private val credentialPattern = Regex("""://[^\s/@:]+:[^\s/@]+@""")
+
+        private fun redactCredentials(message: String): String {
+            return credentialPattern.replace(message, "://***@")
         }
 
         internal fun setStatus(status: String, error: String? = null) {
