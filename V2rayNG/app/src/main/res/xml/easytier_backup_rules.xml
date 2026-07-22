@@ -7,7 +7,14 @@
   file with a Keystore-bound key (which is not included in ADB backups),
   excluding the file provides defense-in-depth against future changes
   to Android's backup behavior.
+
+  Also excludes the cross-process config snapshot and status snapshot
+  files, which contain peer URIs (potentially including credentials),
+  network topology, and connection metadata.  These are transient files
+  that can be regenerated from settings and do not need to be backed up.
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="easytier_secret.xml" />
+    <exclude domain="file" path="easytier_config.json" />
+    <exclude domain="file" path="easytier_status.json" />
 </full-backup-content>
