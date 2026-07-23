@@ -19,7 +19,7 @@ on:
         type: boolean
         default: false
       build_release:
-        description: 'Build release APK (unsigned) instead of debug'
+        description: 'Build release APK (signed with debug keystore) instead of debug'
         required: false
         type: boolean
         default: false
@@ -175,6 +175,16 @@ jobs:
           # Inject ndkVersion into app/build.gradle.kts (same as upstream build.yml)
           sed -i '10i\        ndkVersion = "${{ env.NDK_VERSION }}"' ${{ github.workspace }}/V2rayNG/app/build.gradle.kts
 
+      - name: Verify build_apk_only feasibility
+        if: ${{ inputs.build_apk_only }}
+        run: |
+          echo "ERROR: build_apk_only=true is not supported."
+          echo "actions/download-artifact@v4 can only download artifacts from the current workflow run."
+          echo "Since build-jni is skipped, no JNI .so artifacts are available."
+          echo "Run a normal build instead (both build-jni and build-apk will run)."
+          echo "The Rust build cache (Swatinem/rust-cache) makes subsequent JNI builds fast."
+          exit 1
+
       - name: Download JNI .so artifacts
         uses: actions/download-artifact@v4
         with:
@@ -251,10 +261,18 @@ jobs:
           cd ${{ github.workspace }}/V2rayNG
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           chmod 755 gradlew
+          ABI_FILTERS_ARG=""
+          if [ -n "${{ inputs.abi_filters }}" ]; then
+            ABI_FILTERS_ARG="-PABI_FILTERS=${{ inputs.abi_filters }}"
+          fi
           if [ "${{ inputs.build_release }}" = "true" ]; then
-            ./gradlew assembleRelease
+            ./gradlew assembleRelease $ABI_FILTERS_ARG \
+              -Pandroid.injected.signing.store.file=${{ github.workspace }}/V2rayNG/keystore/debug.keystore \
+              -Pandroid.injected.signing.store.password=android \
+              -Pandroid.injected.signing.key.alias=androiddebugkey \
+              -Pandroid.injected.signing.key.password=android
           else
-            ./gradlew assembleDebug
+            ./gradlew assembleDebug $ABI_FILTERS_ARG
           fi
 
       - name: Upload arm64-v8a APK
@@ -262,7 +280,7 @@ jobs:
         if: ${{ success() }}
         with:
           name: apk-arm64-v8a
-          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*arm64-v8a*.apk
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/*/*arm64-v8a*.apk
           if-no-files-found: error
 
       - name: Upload armeabi-v7a APK
@@ -270,7 +288,7 @@ jobs:
         if: ${{ success() }}
         with:
           name: apk-armeabi-v7a
-          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*armeabi-v7a*.apk
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/*/*armeabi-v7a*.apk
           if-no-files-found: error
 
       - name: Upload x86_64 APK
@@ -278,7 +296,7 @@ jobs:
         if: ${{ success() }}
         with:
           name: apk-x86_64
-          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*x86_64*.apk
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/*/*x86_64*.apk
           if-no-files-found: error
 
       - name: Upload x86 APK
@@ -286,7 +304,7 @@ jobs:
         if: ${{ success() }}
         with:
           name: apk-x86
-          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*x86.apk
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/*/*x86.apk
           if-no-files-found: error
 
       - name: Upload universal APK
@@ -294,7 +312,7 @@ jobs:
         if: ${{ success() }}
         with:
           name: apk-universal
-          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/debug/*universal*.apk
+          path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/*/*universal*.apk
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -328,7 +346,7 @@ jobs:
             # v2rayNG + EasyTier Plugin ${{ inputs.release_tag }}
 
             ## Artifacts
-            - Debug APK builds for arm64-v8a, armeabi-v7a, x86, x86_64, and universal
+            - APK builds for arm64-v8a, armeabi-v7a, x86, x86_64, and universal
             - Built from commit ${{ github.sha }}
 
             ## EasyTier submodule
