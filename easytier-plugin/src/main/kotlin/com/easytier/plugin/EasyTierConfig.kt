@@ -16,6 +16,9 @@ package com.easytier.plugin
  * @property listeners      Listener URIs.  Defaults to SOCKS5 on the configured port.
  * @property socks5Port     Local SOCKS5 port that Xray-core will connect to.
  * @property noTun          If `true`, EasyTier runs without a TUN device (required for coexistence with v2rayNG VPN).
+ * @property lazyP2p        If `true`, P2P connections are established on-demand only when there is traffic to send,
+ *                          reducing idle battery drain from proactive P2P hole-punching and keepalive traffic.
+ *                          Defaults to `true` for battery efficiency on mobile devices.
  * @property mtu            MTU override.  `null` = EasyTier default (1420 for most transports).
  * @property logLevel       EasyTier log level: `"error"`, `"warn"`, `"info"`, `"debug"`, `"trace"`.
  */
@@ -30,6 +33,7 @@ data class EasyTierConfig(
     var listeners: List<String> = emptyList(),
     var socks5Port: Int = EasyTierPlugin.DEFAULT_SOCKS5_PORT,
     var noTun: Boolean = true,
+    var lazyP2p: Boolean = true,
     var mtu: Int? = null,
     var logLevel: String = "warn",
 ) {
@@ -104,6 +108,7 @@ data class EasyTierConfig(
         sb.appendLine()
         sb.appendLine("[flags]")
         sb.appendLine("no_tun = $noTun")
+        sb.appendLine("lazy_p2p = $lazyP2p")
         if (mtu != null) {
             sb.appendLine("mtu = $mtu")
         }

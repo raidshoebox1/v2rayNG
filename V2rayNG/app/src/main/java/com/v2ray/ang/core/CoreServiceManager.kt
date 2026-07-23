@@ -56,11 +56,28 @@ object CoreServiceManager {
      * Background thread that periodically writes the EasyTier status
      * snapshot to a file so the Settings UI (main process) can display
      * live status.  Only running while the VPN EasyTier instance is active.
+     *
+     * The interval is reduced to [STATUS_WRITER_INTERVAL_SCREEN_OFF_MS]
+     * when the screen is off to save battery, since no UI is reading the
+     * snapshot.  It is restored to [EasyTierPlugin.STATUS_WRITER_INTERVAL_MS]
+     * when the screen turns back on.
      */
     @Volatile
     private var statusWriterThread: Thread? = null
     @Volatile
     private var statusWriterRunning: Boolean = false
+    @Volatile
+    private var statusWriterIntervalMs: Long = EasyTierPlugin.STATUS_WRITER_INTERVAL_MS
+
+    companion object {
+        /**
+         * Status writer interval when the screen is off (30 seconds).
+         * The snapshot is only consumed by the Settings UI, which is not
+         * visible when the screen is off, so a longer interval saves
+         * battery without affecting the user experience.
+         */
+        private const val STATUS_WRITER_INTERVAL_SCREEN_OFF_MS = 30_000L
+    }
 
     var serviceControl: SoftReference<ServiceControl>? = null
         set(value) {
@@ -437,6 +454,7 @@ object CoreServiceManager {
     private fun startStatusWriter(context: Context) {
         stopStatusWriter()
         statusWriterRunning = true
+        statusWriterIntervalMs = EasyTierPlugin.STATUS_WRITER_INTERVAL_MS
         val appContext = context.applicationContext
         statusWriterThread = Thread {
             while (statusWriterRunning) {
@@ -445,11 +463,22 @@ object CoreServiceManager {
                 } catch (e: Throwable) {
                     EasyTierPlugin.log("W", "EasyTier: status writer failed (non-fatal)", e)
                 }
-                try {
-                    Thread.sleep(EasyTierPlugin.STATUS_WRITER_INTERVAL_MS)
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
+                // Sleep in 1-second chunks so that interval changes (e.g.
+                // screen on/off) take effect within ~1 second instead of
+                // waiting for the full sleep to elapse.
+                val interval = statusWriterIntervalMs
+                var elapsed = 0L
+                while (statusWriterRunning && elapsed < interval) {
+                    val chunk = minOf(1000L, interval - elapsed)
+                    try {
+                        Thread.sleep(chunk)
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        return@Thread
+                    }
+                    elapsed += chunk
+                    val newInterval = statusWriterIntervalMs
+                    if (newInterval != interval) break
                 }
             }
         }.apply {
@@ -715,11 +744,13 @@ object CoreServiceManager {
                 Intent.ACTION_SCREEN_OFF -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen off")
                     NotificationManager.stopSpeedNotification()
+                    statusWriterIntervalMs = STATUS_WRITER_INTERVAL_SCREEN_OFF_MS
                 }
 
                 Intent.ACTION_SCREEN_ON -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen on")
                     NotificationManager.startSpeedNotification()
+                    statusWriterIntervalMs = EasyTierPlugin.STATUS_WRITER_INTERVAL_MS
                 }
             }
         }

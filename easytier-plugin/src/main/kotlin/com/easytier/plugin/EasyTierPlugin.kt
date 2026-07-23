@@ -973,7 +973,7 @@ class EasyTierPlugin(private val context: Context) {
             // Do NOT log the full TOML — it contains network_secret in cleartext.
             // Only log non-sensitive fields at debug level.
             if (logEnabled && BuildConfig.DEBUG) {
-                log("D", "EasyTier config: instance=${config.instanceName}, network=${config.networkName}, peers=${config.peers.size}, socks5=${config.socks5Port}, noTun=${config.noTun}")
+                log("D", "EasyTier config: instance=${config.instanceName}, network=${config.networkName}, peers=${config.peers.size}, socks5=${config.socks5Port}, noTun=${config.noTun}, lazyP2p=${config.lazyP2p}")
             }
 
             // Parse first to catch config errors early.
