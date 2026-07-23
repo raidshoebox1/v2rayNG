@@ -69,15 +69,13 @@ object CoreServiceManager {
     @Volatile
     private var statusWriterIntervalMs: Long = EasyTierPlugin.STATUS_WRITER_INTERVAL_MS
 
-    companion object {
-        /**
-         * Status writer interval when the screen is off (30 seconds).
-         * The snapshot is only consumed by the Settings UI, which is not
-         * visible when the screen is off, so a longer interval saves
-         * battery without affecting the user experience.
-         */
-        private const val STATUS_WRITER_INTERVAL_SCREEN_OFF_MS = 30_000L
-    }
+    /**
+     * Status writer interval when the screen is off (30 seconds).
+     * The snapshot is only consumed by the Settings UI, which is not
+     * visible when the screen is off, so a longer interval saves
+     * battery without affecting the user experience.
+     */
+    private const val STATUS_WRITER_INTERVAL_SCREEN_OFF_MS = 30_000L
 
     var serviceControl: SoftReference<ServiceControl>? = null
         set(value) {
