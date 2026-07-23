@@ -316,17 +316,37 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Job 3: Create Draft Release (only when release_tag is provided)
+  # Job 3: Create Draft Release
+  #   - push to master: auto-generate tag from versionName + timestamp
+  #   - manual workflow_dispatch with release_tag: use provided tag
   # ─────────────────────────────────────────────────────────────────────────
   create-draft-release:
     name: Create Draft Release
     runs-on: ubuntu-latest
     needs: build-apk
-    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     permissions:
       contents: write
 
     steps:
+      - name: Checkout v2rayNG + EasyTier plugin repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Generate release tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            echo "tag=${{ inputs.release_tag }}" >> $GITHUB_OUTPUT
+          else
+            VERSION_NAME=$(grep 'versionName' V2rayNG/app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            TAG="v${VERSION_NAME}-$(date -u +'%Y%m%d%H%M%S')"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+          fi
+
       - name: Download all APK artifacts
         uses: actions/download-artifact@v4
         with:
@@ -347,14 +367,15 @@ jobs:
       - name: Create Draft Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag }}
-          name: ${{ inputs.release_tag }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
           body: |
-            # v2rayNG + EasyTier Plugin ${{ inputs.release_tag }}
+            # v2rayNG + EasyTier Plugin ${{ steps.tag.outputs.tag }}
 
             ## Artifacts
             - APK builds for arm64-v8a, armeabi-v7a, x86, x86_64, and universal
             - Built from commit ${{ github.sha }}
+            - Build source: ${{ github.event_name == 'push' && 'push to master' || 'manual workflow_dispatch' }}
 
             ## EasyTier submodule
             Pinned to EasyTier/EasyTier (see submodule reference in repo)
