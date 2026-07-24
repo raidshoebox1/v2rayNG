@@ -145,6 +145,9 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
     var logEnabled by rememberSaveable {
         mutableStateOf(EasyTierSettingsManager.isLogEnabled(context))
     }
+    var powerSaving by rememberSaveable {
+        mutableStateOf(EasyTierSettingsManager.isPowerSaving(context))
+    }
 
     // ── Status panel state ──
     var statusText by remember { mutableStateOf("") }
@@ -166,14 +169,15 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── Status refresh: poll every 2 seconds while the composable is active ──
+    // ── Status refresh: poll every 5 seconds while the composable is active ──
+    // Reduced from 2s to 5s to lower JNI overhead and CPU wakeups on Android.
     LaunchedEffect(Unit) {
         while (isActive) {
             val status = withContext(Dispatchers.IO) {
                 EasyTierPlugin.getPeerStatus(context)
             }
             statusText = formatStatus(context, status)
-            delay(2000)
+            delay(5000)
         }
     }
 
@@ -205,6 +209,15 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 onCheckedChange = {
                     enabled = it
                     EasyTierSettingsManager.setEnabled(context, it)
+                }
+            )
+            SettingsSwitchItem(
+                title = stringResource(R.string.easytier_pref_power_saving_title),
+                summary = stringResource(R.string.easytier_pref_power_saving_summary),
+                checked = powerSaving,
+                onCheckedChange = {
+                    powerSaving = it
+                    EasyTierSettingsManager.setPowerSaving(context, it)
                 }
             )
 

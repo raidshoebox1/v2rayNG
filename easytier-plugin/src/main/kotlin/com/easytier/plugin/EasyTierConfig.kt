@@ -18,6 +18,11 @@ package com.easytier.plugin
  * @property noTun          If `true`, EasyTier runs without a TUN device (required for coexistence with v2rayNG VPN).
  * @property mtu            MTU override.  `null` = EasyTier default (1420 for most transports).
  * @property logLevel       EasyTier log level: `"error"`, `"warn"`, `"info"`, `"debug"`, `"trace"`.
+ * @property powerSaving    If `true`, injects power-saving flags into the TOML `[flags]` section:
+ *                          `lazy_p2p`, `disable_upnp`, `latency_first`, `multi_thread_count=1`,
+ *                          and longer PeerConn heartbeat intervals.  Designed to reduce CPU
+ *                          wakeups and background traffic on Android without sacrificing
+ *                          TCP/UDP hole punching or encryption.
  */
 data class EasyTierConfig(
     var enabled: Boolean = false,
@@ -32,6 +37,7 @@ data class EasyTierConfig(
     var noTun: Boolean = true,
     var mtu: Int? = null,
     var logLevel: String = "warn",
+    var powerSaving: Boolean = true,
 ) {
 
     /**
@@ -107,6 +113,48 @@ data class EasyTierConfig(
         if (mtu != null) {
             sb.appendLine("mtu = $mtu")
         }
+
+        // ─── Power-saving flags (balance tier) ───
+        // When enabled, injects flags that reduce CPU wakeups and background
+        // traffic on Android without sacrificing TCP/UDP hole punching,
+        // P2P, or encryption.  These override the EasyTier Rust defaults
+        // (which are tuned for desktop/server use).
+        //
+        // Key trade-offs:
+        //   lazy_p2p=true           — delay P2P connections until needed
+        //   disable_upnp=true       — no background UPnP port mapping
+        //   latency_first=true      — prefer stable low-latency paths
+        //   multi_thread_count=1    — single worker thread (fewer wakeups)
+        //   mobile_power_saving=true— Rust core uses longer interval timers
+        //   peer_conn_max_heartbeat_interval_secs=60 — max 60s between pings
+        //   peer_conn_max_missed_heartbeats=5         — tolerate 5 missed pongs
+        //   peer_conn_pong_timeout_secs=5             — 5s pong wait
+        //   quic_keepalive_interval_secs=30           — 30s QUIC keepalive
+        //
+        // NOT changed (preserved for connectivity):
+        //   enable_encryption       — stays true (security)
+        //   disable_p2p             — stays false (P2P still works)
+        //   disable_tcp_hole_punching — stays false (TCP hole punching active)
+        //   disable_udp_hole_punching — stays false (UDP hole punching active)
+        if (powerSaving) {
+            sb.appendLine("lazy_p2p = true")
+            sb.appendLine("disable_upnp = true")
+            sb.appendLine("latency_first = true")
+            sb.appendLine("multi_thread_count = 1")
+            sb.appendLine("mobile_power_saving = true")
+            sb.appendLine("peer_conn_max_heartbeat_interval_secs = 60")
+            sb.appendLine("peer_conn_max_missed_heartbeats = 5")
+            sb.appendLine("peer_conn_pong_timeout_secs = 5")
+            sb.appendLine("quic_keepalive_interval_secs = 30")
+        }
+
+        // ─── Console logger ───
+        // Control the tracing subscriber level to avoid the CPU overhead
+        // of formatting and writing info/debug/trace messages on Android.
+        // The plugin default is "warn"; the user can change it via logLevel.
+        sb.appendLine()
+        sb.appendLine("[console_logger]")
+        sb.appendLine("level = \"${escapeTomlString(logLevel)}\"")
 
         return sb.toString().trimEnd()
     }

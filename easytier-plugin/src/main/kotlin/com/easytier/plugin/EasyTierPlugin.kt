@@ -86,16 +86,19 @@ class EasyTierPlugin(private val context: Context) {
         const val MAX_LOG_ENTRIES = 500
 
         /** SOCKS5 listener readiness probe: max connection attempts. */
-        const val SOCKS5_MAX_ATTEMPTS = 5
+        const val SOCKS5_MAX_ATTEMPTS = 3
 
         /** SOCKS5 listener readiness probe: connect timeout per attempt (ms). */
         const val SOCKS5_CONNECT_TIMEOUT_MS = 200
 
         /** SOCKS5 listener readiness probe: delay between attempts (ms). */
-        const val SOCKS5_RETRY_DELAY_MS = 400L
+        const val SOCKS5_RETRY_DELAY_MS = 500L
 
-        /** Status writer thread: interval between snapshot writes (ms). */
-        const val STATUS_WRITER_INTERVAL_MS = 3_000L
+        /** Status writer thread: interval between snapshot writes (ms).
+         *  Set to 10s to reduce CPU wakeups on Android. The status file is
+         *  read by the Settings UI on a similar interval, so a shorter write
+         *  interval would not improve UX but would waste battery. */
+        const val STATUS_WRITER_INTERVAL_MS = 10_000L
 
         /** Mesh CIDR polling: max number of poll attempts after VPN start. */
         const val MESH_CIDR_POLL_MAX_ROUNDS = 3

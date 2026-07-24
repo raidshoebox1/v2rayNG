@@ -62,10 +62,14 @@ object EasyTierSettingsManager {
     const val KEY_LOG_ENABLED = PREFIX + "log_enabled"
     const val KEY_MTU = PREFIX + "mtu"
     const val KEY_LOG_LEVEL = PREFIX + "log_level"
+    const val KEY_POWER_SAVING = PREFIX + "power_saving"
 
     // Defaults
     const val DEFAULT_SOCKS5_PORT = EasyTierPlugin.DEFAULT_SOCKS5_PORT
     const val DEFAULT_LOG_LEVEL = EasyTierConfig.DEFAULT_LOG_LEVEL
+
+    /** Default for power-saving mode: enabled to reduce battery drain on Android. */
+    const val DEFAULT_POWER_SAVING = true
 
     private fun prefs(context: Context): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
@@ -126,6 +130,7 @@ object EasyTierSettingsManager {
             addProperty(KEY_LOG_ENABLED, sp.getBoolean(KEY_LOG_ENABLED, true))
             addProperty(KEY_MTU, sp.getString(KEY_MTU, null) ?: "")
             addProperty(KEY_LOG_LEVEL, sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
+            addProperty(KEY_POWER_SAVING, sp.getBoolean(KEY_POWER_SAVING, DEFAULT_POWER_SAVING))
         }
         if (includeVersion) {
             json.addProperty(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
@@ -281,6 +286,8 @@ object EasyTierSettingsManager {
 
     fun getLogLevel(context: Context): String = getStringPref(context, KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL
 
+    fun isPowerSaving(context: Context): Boolean = getBoolPref(context, KEY_POWER_SAVING, DEFAULT_POWER_SAVING)
+
     // ------------------------------------------------------------------
     // Setters — write to SharedPreferences AND snapshot file
     //
@@ -348,6 +355,11 @@ object EasyTierSettingsManager {
         writeSnapshot(context)
     }
 
+    fun setPowerSaving(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_POWER_SAVING, enabled).commit()
+        writeSnapshot(context)
+    }
+
     /**
      * Force-write a snapshot from the current SharedPreferences state.
      * Called from [EasyTierSettingsActivity.onPause] as a safety net
@@ -390,6 +402,7 @@ object EasyTierSettingsManager {
             noTun = true,
             mtu = getMtu(context),
             logLevel = getLogLevel(context),
+            powerSaving = isPowerSaving(context),
         )
     }
 
@@ -490,6 +503,9 @@ object EasyTierSettingsManager {
         }
         json.get(KEY_LOG_LEVEL)?.takeIf { it.isJsonPrimitive }?.asString?.let {
             editor.putString(KEY_LOG_LEVEL, it); hasAny = true
+        }
+        json.get(KEY_POWER_SAVING)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
+            editor.putBoolean(KEY_POWER_SAVING, it); hasAny = true
         }
 
         if (hasAny) {

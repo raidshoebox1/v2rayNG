@@ -12,6 +12,10 @@
     <string name="easytier_pref_enable_title">Run EasyTier mesh network alongside v2rayNG</string>
     <string name="easytier_enable_summary_on">EasyTier will start automatically when v2rayNG VPN is connected.</string>
     <string name="easytier_enable_summary_off">Disabled. Enable to start EasyTier with VPN.</string>
+
+    <!-- Power Saving -->
+    <string name="easytier_pref_power_saving_title">Power Saving Mode</string>
+    <string name="easytier_pref_power_saving_summary">Reduces battery drain by using longer heartbeat intervals, single-thread mode, and lazy P2P. TCP/UDP hole punching and encryption remain active. Takes effect on next VPN start.</string>
     <string name="easytier_pref_network_name_title">Network Name</string>
     <string name="easytier_pref_network_name_hint">Must match across all peers</string>
 

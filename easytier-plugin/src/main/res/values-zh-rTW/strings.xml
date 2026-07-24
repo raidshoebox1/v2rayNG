@@ -13,6 +13,10 @@
     <string name="easytier_enable_summary_on">連線 v2rayNG VPN 時將自動啟動 EasyTier。</string>
     <string name="easytier_enable_summary_off">已停用。啟用後將在 VPN 連線時啟動 EasyTier。</string>
 
+    <!-- Power Saving -->
+    <string name="easytier_pref_power_saving_title">省電模式</string>
+    <string name="easytier_pref_power_saving_summary">透過延長心跳間隔、單執行緒模式和按需 P2P 來降低耗電。TCP/UDP 打洞和加密保持開啟。下次啟動 VPN 時生效。</string>
+
     <!-- Network Name -->
     <string name="easytier_pref_network_name_title">網路名稱</string>
     <string name="easytier_pref_network_name_hint">所有節點必須使用相同的網路名稱</string>
