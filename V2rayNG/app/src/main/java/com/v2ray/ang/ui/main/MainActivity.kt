@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.lifecycleScope
+import com.easytier.plugin.ui.EasyTierSettingsActivity
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
@@ -140,6 +141,7 @@ class MainActivity : HelperBaseComponentActivity() {
             "per_app_proxy" -> Intent(this, PerAppProxyActivity::class.java)
             "routing_setting" -> Intent(this, RoutingSettingActivity::class.java)
             "user_asset" -> Intent(this, UserAssetActivity::class.java)
+            "easytier" -> Intent(this, EasyTierSettingsActivity::class.java)
             "settings" -> Intent(this, SettingsActivity::class.java)
             "logcat" -> Intent(this, LogcatActivity::class.java)
             "check_update" -> Intent(this, CheckUpdateActivity::class.java)

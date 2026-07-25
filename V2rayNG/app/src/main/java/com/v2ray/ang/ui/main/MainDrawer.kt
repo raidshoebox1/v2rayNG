@@ -81,6 +81,7 @@ fun MainDrawerContent(onNavigate: (String) -> Unit) {
                     DrawerMenuItemData(R.drawable.ic_per_apps_24dp, R.string.per_app_proxy_settings, "per_app_proxy"),
                     DrawerMenuItemData(R.drawable.ic_routing_24dp, R.string.routing_settings_title, "routing_setting"),
                     DrawerMenuItemData(R.drawable.ic_file_24dp, R.string.title_user_asset_setting, "user_asset"),
+                    DrawerMenuItemData(R.drawable.ic_easytier_24dp, R.string.easytier_settings_entry_title, "easytier"),
                     DrawerMenuItemData(R.drawable.ic_settings_24dp, R.string.title_settings, "settings")
                 ),
                 onNavigate = onNavigate
