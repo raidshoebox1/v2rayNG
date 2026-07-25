@@ -121,7 +121,7 @@
         <activity
             android:name="com.easytier.plugin.ui.EasyTierSettingsActivity"
             android:exported="false"
-            android:parentActivityName=".ui.settings.SettingsActivity" />
+            android:parentActivityName=".ui.main.MainActivity" />
         <activity
             android:name=".ui.perappproxy.PerAppProxyActivity"
             android:exported="false" />

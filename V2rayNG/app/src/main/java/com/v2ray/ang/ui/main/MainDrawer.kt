@@ -37,6 +37,7 @@ enum class MainDestination(@DrawableRes val iconRes: Int, @StringRes val labelRe
     PerAppProxy(R.drawable.ic_per_apps_24dp, R.string.per_app_proxy_settings),
     Routing(R.drawable.ic_routing_24dp, R.string.routing_settings_title),
     UserAssets(R.drawable.ic_file_24dp, R.string.title_user_asset_setting),
+    EasyTier(R.drawable.ic_easytier_24dp, R.string.easytier_settings_entry_title),
     Settings(R.drawable.ic_settings_24dp, R.string.title_settings),
     Promotion(R.drawable.ic_promotion_24dp, R.string.title_pref_promotion),
     Logcat(R.drawable.ic_logcat_24dp, R.string.title_logcat),
@@ -50,6 +51,7 @@ private val primaryDrawerItems = listOf(
     MainDestination.PerAppProxy,
     MainDestination.Routing,
     MainDestination.UserAssets,
+    MainDestination.EasyTier,
     MainDestination.Settings
 )
 
