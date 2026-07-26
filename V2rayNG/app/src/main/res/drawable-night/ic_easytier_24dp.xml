@@ -7,8 +7,6 @@
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="36"
-        android:strokeLinecap="round"
-        android:strokeLinejoin="round"
         android:pathData="M 872,512 A 360,360 0 1,1 152,512 A 360,360 0 1,1 872,512 Z M 602,512 A 90,90 0 1,1 422,512 A 90,90 0 1,1 602,512 Z M 556,152 A 44,44 0 1,1 468,152 A 44,44 0 1,1 556,152 Z M 460,196 A 52,36 0 0,1 564,196 M 244,692 A 44,44 0 1,1 156,692 A 44,44 0 1,1 244,692 Z M 148,736 A 52,36 0 0,1 252,736 M 868,692 A 44,44 0 1,1 780,692 A 44,44 0 1,1 868,692 Z M 772,736 A 52,36 0 0,1 876,736" />
     <path
         android:fillColor="#FFFFFFFF"
