@@ -145,6 +145,9 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
     var logEnabled by rememberSaveable {
         mutableStateOf(EasyTierSettingsManager.isLogEnabled(context))
     }
+    var pauseOnScreenOff by rememberSaveable {
+        mutableStateOf(EasyTierSettingsManager.isPauseOnScreenOff(context))
+    }
 
     // ── Status panel state ──
     var statusText by remember { mutableStateOf("") }
@@ -205,6 +208,15 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 onCheckedChange = {
                     enabled = it
                     EasyTierSettingsManager.setEnabled(context, it)
+                }
+            )
+            SettingsSwitchItem(
+                title = stringResource(R.string.easytier_pref_pause_on_screen_off_title),
+                summary = stringResource(R.string.easytier_pref_pause_on_screen_off_summary),
+                checked = pauseOnScreenOff,
+                onCheckedChange = {
+                    pauseOnScreenOff = it
+                    EasyTierSettingsManager.setPauseOnScreenOff(context, it)
                 }
             )
 
