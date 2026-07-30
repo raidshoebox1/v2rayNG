@@ -62,10 +62,14 @@ object EasyTierSettingsManager {
     const val KEY_LOG_ENABLED = PREFIX + "log_enabled"
     const val KEY_MTU = PREFIX + "mtu"
     const val KEY_LOG_LEVEL = PREFIX + "log_level"
+    const val KEY_PAUSE_ON_SCREEN_OFF = PREFIX + "pause_on_screen_off"
 
     // Defaults
     const val DEFAULT_SOCKS5_PORT = EasyTierPlugin.DEFAULT_SOCKS5_PORT
     const val DEFAULT_LOG_LEVEL = EasyTierConfig.DEFAULT_LOG_LEVEL
+
+    /** Default for pause-on-screen-off: disabled (opt-in extreme power saving). */
+    const val DEFAULT_PAUSE_ON_SCREEN_OFF = false
 
     private fun prefs(context: Context): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
@@ -126,6 +130,7 @@ object EasyTierSettingsManager {
             addProperty(KEY_LOG_ENABLED, sp.getBoolean(KEY_LOG_ENABLED, true))
             addProperty(KEY_MTU, sp.getString(KEY_MTU, null) ?: "")
             addProperty(KEY_LOG_LEVEL, sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
+            addProperty(KEY_PAUSE_ON_SCREEN_OFF, sp.getBoolean(KEY_PAUSE_ON_SCREEN_OFF, DEFAULT_PAUSE_ON_SCREEN_OFF))
         }
         if (includeVersion) {
             json.addProperty(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
@@ -281,6 +286,8 @@ object EasyTierSettingsManager {
 
     fun getLogLevel(context: Context): String = getStringPref(context, KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL
 
+    fun isPauseOnScreenOff(context: Context): Boolean = getBoolPref(context, KEY_PAUSE_ON_SCREEN_OFF, DEFAULT_PAUSE_ON_SCREEN_OFF)
+
     // ------------------------------------------------------------------
     // Setters — write to SharedPreferences AND snapshot file
     //
@@ -345,6 +352,11 @@ object EasyTierSettingsManager {
 
     fun setLogLevel(context: Context, level: String) {
         prefs(context).edit().putString(KEY_LOG_LEVEL, level).commit()
+        writeSnapshot(context)
+    }
+
+    fun setPauseOnScreenOff(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PAUSE_ON_SCREEN_OFF, enabled).commit()
         writeSnapshot(context)
     }
 
@@ -490,6 +502,9 @@ object EasyTierSettingsManager {
         }
         json.get(KEY_LOG_LEVEL)?.takeIf { it.isJsonPrimitive }?.asString?.let {
             editor.putString(KEY_LOG_LEVEL, it); hasAny = true
+        }
+        json.get(KEY_PAUSE_ON_SCREEN_OFF)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
+            editor.putBoolean(KEY_PAUSE_ON_SCREEN_OFF, it); hasAny = true
         }
 
         if (hasAny) {

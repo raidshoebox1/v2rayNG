@@ -84,4 +84,8 @@
     <string name="easytier_network_info_empty">No network info available. Make sure EasyTier is enabled and v2rayNG VPN is connected.</string>
     <string name="easytier_copy_to_clipboard">Copy</string>
     <string name="easytier_copied_to_clipboard">Copied to clipboard</string>
+
+    <!-- Power saving -->
+    <string name="easytier_pref_pause_on_screen_off_title">Pause on Screen Off</string>
+    <string name="easytier_pref_pause_on_screen_off_summary">Stops EasyTier mesh networking when the screen turns off to drastically reduce idle battery drain. Mesh routing resumes automatically when the screen turns on. VPN connectivity is unaffected.</string>
 </resources>
