@@ -86,4 +86,8 @@
     <string name="easytier_network_info_empty">无网络信息。请确保 EasyTier 已启用且 v2rayNG VPN 已连接。</string>
     <string name="easytier_copy_to_clipboard">复制</string>
     <string name="easytier_copied_to_clipboard">已复制到剪贴板</string>
+
+    <!-- 省电 -->
+    <string name="easytier_pref_pause_on_screen_off_title">息屏暂停</string>
+    <string name="easytier_pref_pause_on_screen_off_summary">屏幕关闭时停止 EasyTier 组网以大幅降低待机耗电。屏幕开启时自动恢复组网。VPN 连接不受影响。</string>
 </resources>
