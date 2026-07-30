@@ -709,7 +709,6 @@ object CoreServiceManager {
                         easyTierPausedByScreenOff = false
                         val svc = serviceControl.getService()
                         Thread {
-                            name = "EasyTierScreenOnResume"
                             EasyTierPlugin.log("I", "EasyTier: resuming mesh networking on screen on")
                             startEasyTier(svc)
                             // Re-check the flag in case the screen was turned off again
@@ -718,7 +717,11 @@ object CoreServiceManager {
                                 EasyTierPlugin.log("I", "EasyTier: screen turned off during resume, re-pausing")
                                 stopEasyTier(svc)
                             }
-                        }.start()
+                        }.apply {
+                            name = "EasyTierScreenOnResume"
+                            isDaemon = true
+                            start()
+                        }
                     }
                 }
             }
