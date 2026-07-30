@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import android.system.OsConstants
 import androidx.core.content.ContextCompat
 import com.v2ray.ang.AppConfig
@@ -65,6 +66,15 @@ object CoreServiceManager {
     private var statusWriterThread: Thread? = null
     @Volatile
     private var statusWriterRunning: Boolean = false
+
+    /**
+     * Whether EasyTier is currently paused because the screen is off.
+     * When true, a screen-on broadcast will resume EasyTier on a background
+     * thread.  Volatile because it is read/written from both the main thread
+     * (broadcast receiver) and the background resume thread.
+     */
+    @Volatile
+    private var easyTierPausedByScreenOff = false
 
     var serviceControl: SoftReference<ServiceControl>? = null
         set(value) {
@@ -211,6 +221,21 @@ object CoreServiceManager {
         }
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
+
+        // If pause-on-screen-off is enabled and the screen is already off at
+        // startup, stop EasyTier immediately.  The mesh CIDRs have already
+        // been polled and baked into the Xray config, so Xray will continue
+        // to route mesh traffic through the (now-stopped) SOCKS5 endpoint,
+        // which will simply fail to connect until EasyTier is resumed on
+        // screen-on.
+        if (EasyTierSettingsManager.isPauseOnScreenOff(service)) {
+            val pm = service.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm != null && !pm.isInteractive) {
+                EasyTierPlugin.log("I", "EasyTier: screen is off at startup, pausing mesh networking")
+                stopEasyTier(service)
+                easyTierPausedByScreenOff = true
+            }
+        }
     }
 
     /**
@@ -227,6 +252,7 @@ object CoreServiceManager {
 
         // Stop EasyTier plugin after Xray-core stops
         stopEasyTier(service)
+        easyTierPausedByScreenOff = false
 
         if (isRunning()) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -662,11 +688,35 @@ object CoreServiceManager {
                 Intent.ACTION_SCREEN_OFF -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen off")
                     NotificationManager.stopSpeedNotification()
+                    // Pause EasyTier if pause-on-screen-off is enabled
+                    if (EasyTierSettingsManager.isPauseOnScreenOff(serviceControl.getService())) {
+                        if (!easyTierPausedByScreenOff) {
+                            easyTierPausedByScreenOff = true
+                            EasyTierPlugin.log("I", "EasyTier: pausing mesh networking on screen off")
+                            stopEasyTier(serviceControl.getService())
+                        }
+                    }
                 }
 
                 Intent.ACTION_SCREEN_ON -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen on")
                     NotificationManager.startSpeedNotification()
+                    // Resume EasyTier if it was paused by screen-off
+                    if (easyTierPausedByScreenOff) {
+                        easyTierPausedByScreenOff = false
+                        val svc = serviceControl.getService()
+                        Thread {
+                            name = "EasyTierScreenOnResume"
+                            EasyTierPlugin.log("I", "EasyTier: resuming mesh networking on screen on")
+                            startEasyTier(svc)
+                            // Re-check the flag in case the screen was turned off again
+                            // while startEasyTier was running (~2s startup delay).
+                            if (easyTierPausedByScreenOff) {
+                                EasyTierPlugin.log("I", "EasyTier: screen turned off during resume, re-pausing")
+                                stopEasyTier(svc)
+                            }
+                        }.start()
+                    }
                 }
             }
         }
