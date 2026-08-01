@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import android.preference.PreferenceManager
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import androidx.security.crypto.MasterKeys
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.File
@@ -197,13 +197,13 @@ object EasyTierSettingsManager {
     private fun secretPrefs(context: Context): SharedPreferences? {
         secretPrefs?.let { return it }
         return try {
-            val masterKey = MasterKey.Builder(context.applicationContext)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
+            // security-crypto 1.0.0 (stable) API — MasterKey only exists in the
+            // 1.1.0 alpha line, so use the 1.0.0 MasterKeys.getOrCreate() alias.
+            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
             val sp = EncryptedSharedPreferences.create(
                 context.applicationContext,
                 SECRET_FILE,
-                masterKey,
+                masterKeyAlias,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
