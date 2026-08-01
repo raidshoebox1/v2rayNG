@@ -611,12 +611,14 @@ object CoreServiceManager {
                 Intent.ACTION_SCREEN_OFF -> {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen off")
                     NotificationManager.stopSpeedNotification()
+                    val svc = serviceControl.getService()
+                    if (svc == null) return
                     // Pause EasyTier if pause-on-screen-off is enabled
-                    if (EasyTierSettingsManager.isPauseOnScreenOff(serviceControl.getService())) {
+                    if (EasyTierSettingsManager.isPauseOnScreenOff(svc)) {
                         if (!easyTierPausedByScreenOff) {
                             easyTierPausedByScreenOff = true
                             EasyTierPlugin.log("I", "EasyTier: pausing mesh networking on screen off")
-                            stopEasyTier(serviceControl.getService())
+                            stopEasyTier(svc)
                         }
                     }
                 }
@@ -626,8 +628,14 @@ object CoreServiceManager {
                     NotificationManager.startSpeedNotification()
                     // Resume EasyTier if it was paused by screen-off
                     if (easyTierPausedByScreenOff) {
-                        easyTierPausedByScreenOff = false
                         val svc = serviceControl.getService()
+                        if (svc == null) {
+                            // Service is gone (e.g. process being torn down) — no point
+                            // resuming; just clear the paused flag.
+                            easyTierPausedByScreenOff = false
+                            return
+                        }
+                        easyTierPausedByScreenOff = false
                         Thread {
                             EasyTierPlugin.log("I", "EasyTier: resuming mesh networking on screen on")
                             startEasyTier(svc)

@@ -2,6 +2,9 @@ package com.easytier.plugin
 
 import android.content.Context
 import android.util.Log
+import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.LogCallback
@@ -56,6 +59,18 @@ class EasyTierPlugin(private val context: Context) {
     companion object {
         private const val TAG = "EasyTierPlugin"
 
+        /**
+         * Serializes access to the native EasyTier library across threads.
+         *
+         * The status-writer thread calls [collectNetworkInfos] periodically in
+         * the VPN process while [EasyTierPlugin.stop]/[start] may concurrently
+         * call [EasyTierJNI.stopAllInstances]/[runNetworkInstance] on the same
+         * native library. The native side is not guaranteed to be safe under
+         * concurrent entry, so all native RPC entry points are serialized on
+         * this lock.
+         */
+        private val nativeLock = Any()
+
         /** Default SOCKS5 port for the EasyTier listener. */
         const val DEFAULT_SOCKS5_PORT = 10852
 
@@ -64,13 +79,6 @@ class EasyTierPlugin(private val context: Context) {
 
         /** Outbound tag used in Xray-core routing. */
         const val OUTBOUND_TAG = "easytier"
-
-        /** CIDRs that should be routed through EasyTier. */
-        val DEFAULT_LAN_CIDRS = listOf(
-            "10.0.0.0/8",
-            "172.16.0.0/12",
-            "192.168.0.0/16"
-        )
 
         // ------------------------------------------------------------------
         // Tuning constants (centralized for easy adjustment)
@@ -163,15 +171,17 @@ class EasyTierPlugin(private val context: Context) {
         @JvmStatic
         fun writeStatusSnapshot(context: Context) {
             if (!isJniAvailable()) return
-            try {
-                val json = EasyTierJNI.collectNetworkInfos(50)
-                if (json.isNullOrBlank()) return
-                val file = statusSnapshotFile(context)
-                val tmp = File(file.parentFile, "$STATUS_SNAPSHOT_FILE.tmp")
-                tmp.writeText(json)
-                tmp.renameTo(file)
-            } catch (e: Throwable) {
-                log("W", "Failed to write status snapshot", e)
+            synchronized(nativeLock) {
+                try {
+                    val json = EasyTierJNI.collectNetworkInfos(50)
+                    if (json.isNullOrBlank()) return
+                    val file = statusSnapshotFile(context)
+                    val tmp = File(file.parentFile, "$STATUS_SNAPSHOT_FILE.tmp")
+                    tmp.writeText(json)
+                    tmp.renameTo(file)
+                } catch (e: Throwable) {
+                    log("W", "Failed to write status snapshot", e)
+                }
             }
         }
 
@@ -361,18 +371,61 @@ class EasyTierPlugin(private val context: Context) {
         }
 
         /**
-         * Redact credentials from URIs in log messages.
-         *
-         * Matches patterns like `scheme://user:pass@host` and replaces the
-         * `user:pass@` part with `***@`.  Handles multiple URIs in a single
-         * message.  Only matches when both a colon and an at-sign are present
-         * after `://`, so plain `host:port` URIs without credentials are
-         * left untouched.
+         * Matches `://user@`, `://user:pass@` inside a URI and redacts the
+         * credential portion. Handles both password-protected and username-only
+         * credentials, and multiple URIs in a single message.
          */
-        private val credentialPattern = Regex("://[^\\s/@:]+:[^\\s/@]+@")
+        private val credentialPattern = Regex("://[^\\s/@:]+(:[^\\s/@]+)?@")
 
         private fun redactCredentials(message: String): String {
             return credentialPattern.replace(message, "://***@")
+        }
+
+        /**
+         * Redact credentials and secrets embedded in a (pretty-printed) JSON
+         * string before it is shown in the UI.
+         *
+         * Recursively walks the JSON, drops keys that look like secrets (e.g.
+         * `network_secret`, anything containing "secret"/"password"), and runs
+         * every string value through [redactCredentials] so peer URIs with
+         * embedded credentials are masked.
+         *
+         * If the input is not valid JSON, falls back to plain [redactCredentials].
+         */
+        @JvmStatic
+        fun redactJsonForDisplay(json: String): String {
+            return try {
+                val el = JsonParser.parseString(json)
+                redactJsonElement(el)
+                Gson().toJson(el)
+            } catch (e: Throwable) {
+                redactCredentials(json)
+            }
+        }
+
+        private fun redactJsonElement(el: JsonElement?) {
+            if (el == null || el.isJsonNull || el.isJsonPrimitive) return
+            if (el.isJsonObject) {
+                val obj = el.asJsonObject
+                val toRemove = mutableListOf<String>()
+                for ((key, value) in obj.entrySet()) {
+                    if (isSensitiveKey(key)) {
+                        toRemove.add(key)
+                    } else if (value.isJsonPrimitive && value.asJsonPrimitive.isString) {
+                        obj.addProperty(key, redactCredentials(value.asString))
+                    } else {
+                        redactJsonElement(value)
+                    }
+                }
+                toRemove.forEach { obj.remove(it) }
+            } else if (el.isJsonArray) {
+                el.asJsonArray.forEach { redactJsonElement(it) }
+            }
+        }
+
+        private fun isSensitiveKey(key: String): Boolean {
+            val k = key.lowercase()
+            return k == "network_secret" || k.contains("secret") || k.contains("password")
         }
 
         internal fun setStatus(status: String, error: String? = null) {
@@ -406,7 +459,7 @@ class EasyTierPlugin(private val context: Context) {
                     return cached
                 }
             }
-            val result = collectMeshCidrs()
+            val result = synchronized(nativeLock) { collectMeshCidrs() }
             meshCidrsCache = result
             meshCidrsCacheTime = now
             return result
@@ -420,6 +473,45 @@ class EasyTierPlugin(private val context: Context) {
         fun clearMeshCidrsCache() {
             meshCidrsCache = null
             meshCidrsCacheTime = 0L
+        }
+
+        /**
+         * Convert a configured host virtual IPv4 into its /24 subnet
+         * (EasyTier's default virtual-network prefix). Returns null if the
+         * value is not a valid IPv4.
+         */
+        private fun hostToSubnet24(ip: String): String? {
+            val octets = ip.trim().split(".")
+            if (octets.size != 4) return null
+            val o = octets.map { it.toIntOrNull() ?: return null }
+            if (o.any { it !in 0..255 }) return null
+            return "${o[0]}.${o[1]}.${o[2]}.0/24"
+        }
+
+        /**
+         * The mesh IPv4 subnets that should actually be routed through EasyTier.
+         *
+         * Consists of:
+         *  - the configured virtual-IP /24 subnet (known before EasyTier starts,
+         *    so the VPN tun route can be added at setup time), and
+         *  - any discovered mesh CIDRs reported by a running instance
+         *    (safe-filtered).
+         *
+         * For auto-assign users (no explicit virtual IP) the discovered CIDRs
+         * alone are used once the instance is running and has converged.
+         *
+         * Intentionally does NOT blanket-route the whole RFC1918 space, so
+         * enabling EasyTier no longer hijacks the device's real LAN
+         * (gateway/router/NAS) before EasyTier has actually claimed those routes.
+         */
+        @JvmStatic
+        fun getEffectiveRoutingCidrs(context: Context): List<String> {
+            val cidrs = LinkedHashSet<String>()
+            EasyTierSettingsManager.getVirtualIp(context)?.let {
+                hostToSubnet24(it)?.let { s -> if (isSafeMeshCidr(s)) cidrs.add(s) }
+            }
+            getMeshCidrsStatic().forEach { if (isSafeMeshCidr(it)) cidrs.add(it) }
+            return cidrs.toList()
         }
 
         // ------------------------------------------------------------------
@@ -564,29 +656,35 @@ class EasyTierPlugin(private val context: Context) {
             if (ip.contains(":")) {
                 // IPv6
                 if (prefix > 128) return false
-                if (prefix <= 7) return false  // reject ::/0 through ::/7
-                // Only allow ULA (fc00::/7) and link-local (fe80::/10)
                 val ipLower = ip.lowercase()
-                return ipLower.startsWith("fc") || ipLower.startsWith("fd") ||
-                       ipLower.startsWith("fe8") || ipLower.startsWith("fe9") ||
-                       ipLower.startsWith("fea") || ipLower.startsWith("feb")
+                return when {
+                    // ULA fc00::/7 — the network must stay within the ULA block
+                    ipLower.startsWith("fc") || ipLower.startsWith("fd") -> prefix >= 7
+                    // link-local fe80::/10 — must stay within the link-local block
+                    ipLower.startsWith("fe8") || ipLower.startsWith("fe9") ||
+                        ipLower.startsWith("fea") || ipLower.startsWith("feb") -> prefix >= 10
+                    else -> false
+                }
             } else {
                 // IPv4
                 if (prefix > 32) return false
-                if (prefix <= 7) return false  // reject 0.0.0.0/0 through /7
                 val octets = ip.split(".")
                 if (octets.size != 4) return false
                 val o = octets.map { it.toIntOrNull() ?: return false }
                 if (o.any { it !in 0..255 }) return false
-                // Only allow private / special-use ranges
-                return when {
-                    o[0] == 10 -> true                              // 10.0.0.0/8
-                    o[0] == 172 && o[1] in 16..31 -> true            // 172.16.0.0/12
-                    o[0] == 192 && o[1] == 168 -> true               // 192.168.0.0/16
-                    o[0] == 169 && o[1] == 254 -> true               // 169.254.0.0/16 (link-local)
-                    o[0] == 100 && o[1] in 64..127 -> true           // 100.64.0.0/10 (CGNAT)
-                    else -> false
+                // Only allow private / special-use ranges. The requested prefix
+                // must be at least as specific as the containing range, so a peer
+                // cannot advertise a network that spills out of the allowed block
+                // (e.g. 192.168.0.0/8, 10.0.0.0/7, 11.0.0.0/8).
+                val minPrefix = when {
+                    o[0] == 10 -> 8                              // 10.0.0.0/8
+                    o[0] == 172 && o[1] in 16..31 -> 12           // 172.16.0.0/12
+                    o[0] == 192 && o[1] == 168 -> 16              // 192.168.0.0/16
+                    o[0] == 169 && o[1] == 254 -> 16              // 169.254.0.0/16 (link-local)
+                    o[0] == 100 && o[1] in 64..127 -> 10          // 100.64.0.0/10 (CGNAT)
+                    else -> return false
                 }
+                return prefix >= minPrefix
             }
         }
 
@@ -953,13 +1051,13 @@ class EasyTierPlugin(private val context: Context) {
                 // listInstances may fail on some JNI versions; non-fatal
             }
             try {
-                EasyTierJNI.stopAllInstances()
+                synchronized(nativeLock) {
+                    EasyTierJNI.stopAllInstances()
+                }
             } catch (e: Throwable) {
                 log("W", "EasyTier: failed to stop stale instances before start", e)
             }
             clearMeshCidrsCache()
-
-            // Register/deregister JNI log callback based on logEnabled setting
             val logEnabled = EasyTierSettingsManager.isLogEnabled(context)
             if (logEnabled) {
                 ensureLogCallbackRegistered()
@@ -977,7 +1075,9 @@ class EasyTierPlugin(private val context: Context) {
             }
 
             // Parse first to catch config errors early.
-            val parseResult = EasyTierJNI.parseConfig(toml)
+            val parseResult = synchronized(nativeLock) {
+                EasyTierJNI.parseConfig(toml)
+            }
             if (parseResult != 0) {
                 val err = EasyTierJNI.getLastError() ?: "unknown error (code=$parseResult)"
                 log("E", "EasyTier config parse failed: $err")
@@ -986,7 +1086,9 @@ class EasyTierPlugin(private val context: Context) {
             }
 
             // Start the network instance.
-            val runResult = EasyTierJNI.runNetworkInstance(toml)
+            val runResult = synchronized(nativeLock) {
+                EasyTierJNI.runNetworkInstance(toml)
+            }
             if (runResult != 0) {
                 val err = EasyTierJNI.getLastError() ?: "unknown error (code=$runResult)"
                 log("E", "EasyTier runNetworkInstance failed: $err")
@@ -1000,7 +1102,9 @@ class EasyTierPlugin(private val context: Context) {
             if (!waitForSocks5(config.socks5Port)) {
                 log("E", "EasyTier SOCKS5 listener on port ${config.socks5Port} not ready after all retries — aborting start")
                 try {
-                    EasyTierJNI.stopAllInstances()
+                    synchronized(nativeLock) {
+                        EasyTierJNI.stopAllInstances()
+                    }
                 } catch (e: Throwable) {
                     log("W", "EasyTier: failed to stop instance after SOCKS5 timeout", e)
                 }
@@ -1034,7 +1138,9 @@ class EasyTierPlugin(private val context: Context) {
     fun stop() {
         if (!running) return
         try {
-            EasyTierJNI.stopAllInstances()
+            synchronized(nativeLock) {
+                EasyTierJNI.stopAllInstances()
+            }
             log("I", "EasyTier instance stopped")
         } catch (e: Throwable) {
             log("E", "Failed to stop EasyTier instance", e)
@@ -1074,7 +1180,7 @@ class EasyTierPlugin(private val context: Context) {
     fun isRunning(): Boolean {
         if (!running) return false
         return try {
-            val json = EasyTierJNI.collectNetworkInfos(10)
+            val json = synchronized(nativeLock) { EasyTierJNI.collectNetworkInfos(10) }
             if (json.isNullOrBlank()) return false
             val parsed = JsonParser.parseString(json)
             if (parsed.isJsonObject) {

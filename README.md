@@ -103,12 +103,21 @@ App traffic → VpnService → Xray-core routing
 
 Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); topology changes may take up to 5 s to propagate into routing rules.
 
+### Routing scope
+
+Only the mesh subnets EasyTier actually owns are routed through it: the configured **virtual-IP subnet** (default `a.b.c.0/24`) plus any **discovered mesh CIDRs** reported by a running instance. Enabling EasyTier does **not** blanket-route the whole RFC1918 space, so a device's real LAN (gateway/router/NAS on 10.x/172.16-31.x/192.168.x) is left untouched unless EasyTier claims those routes. For auto-assign users (no explicit virtual IP), routing is driven purely by the discovered mesh CIDRs once the instance is running and has converged.
+
 ### Security
 
 - **SOCKS5 binds to `127.0.0.1` only** — the EasyTier SOCKS5 listener is not exposed to other devices on the LAN.
-- **Network secret** is stored in `EncryptedSharedPreferences` (AES-256-GCM) in a separate file (`easytier_secret`), not in the default plaintext prefs.
-- **Debug logs are suppressed in release builds** — guarded by `BuildConfig.DEBUG`; only W/E levels reach logcat, the in-app log viewer still shows all levels.
-- **Mesh CIDR safelist** — injected routes are validated against private/special ranges (10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, fc00::/7, fe80::/10); a malicious peer advertising `0.0.0.0/0` or public ranges is rejected.
+- **Network secret** is stored in `EncryptedSharedPreferences` (AES-256-GCM, `androidx.security:security-crypto:1.0.0` stable) in a separate file (`easytier_secret`), not in the default plaintext prefs.
+- **Debug logs are suppressed in release builds** — guarded by `BuildConfig.DEBUG`; only W/E levels reach logcat, the in-app log viewer still shows all levels. Credentials embedded in peer URIs are redacted from both the log buffer and logcat.
+- **Mesh CIDR safelist** — injected routes are validated against private/special ranges (10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, fc00::/7, fe80::/10) and the requested prefix must stay strictly inside the allowed block, so a malicious peer advertising `0.0.0.0/0`, public ranges, or an over-broad prefix (e.g. `192.168.0.0/8`) is rejected.
+- **Backup caveat:** when you export a v2rayNG backup, the EasyTier network secret and peer URIs are stored in **plaintext** inside `easytier_settings.json` inside the backup ZIP (same security level as v2rayNG's own server settings). Protect the backup with a strong password and never share it over insecure channels. The cross-process snapshot/status files are excluded from ADB backups via `easytier_backup_rules.xml`.
+
+### Upstream base
+
+This fork is built on a specific upstream v2rayNG commit and adapts to upstream API changes (e.g. `BaseComponentActivity` package moves, Compose import restructuring). Rebasing onto a newer upstream will require re-applying the EasyTier integration; pin and track the upstream commit used for each rebase.
 
 ### Build
 

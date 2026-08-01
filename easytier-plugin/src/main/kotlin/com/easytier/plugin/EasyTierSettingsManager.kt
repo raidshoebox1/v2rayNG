@@ -485,8 +485,9 @@ object EasyTierSettingsManager {
             val peers = peersStr.split(",").map { p -> p.trim() }.filter { it.isNotEmpty() }
             editor.putString(KEY_PEERS, peers.joinToString(",")); hasAny = true
         }
-        json.get(KEY_SOCKS5_PORT)?.takeIf { it.isJsonPrimitive }?.asInt?.let { port ->
-            if (port in 1..65535) {
+        json.get(KEY_SOCKS5_PORT)?.takeIf { it.isJsonPrimitive }?.asString?.let { portStr ->
+            val port = portStr.toIntOrNull()
+            if (port != null && port in 1..65535) {
                 editor.putString(KEY_SOCKS5_PORT, port.toString()); hasAny = true
             }
         }

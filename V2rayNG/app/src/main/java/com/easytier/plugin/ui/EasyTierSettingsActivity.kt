@@ -159,19 +159,27 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
 
     // ── Sync isTestRunning on resume (activity may have been recreated) ──
     val lifecycleOwner = LocalLifecycleOwner.current
+    // When the activity is paused (backgrounded) we stop the 2s status poller to
+    // avoid needless JNI traffic / battery drain while not visible.
+    var resumed by remember { mutableStateOf(false) }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                isTestRunning = EasyTierPlugin.isTestRunning()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    resumed = true
+                    isTestRunning = EasyTierPlugin.isTestRunning()
+                }
+                Lifecycle.Event.ON_PAUSE -> resumed = false
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── Status refresh: poll every 2 seconds while the composable is active ──
-    LaunchedEffect(Unit) {
-        while (isActive) {
+    // ── Status refresh: poll every 2 seconds while the activity is RESUMED ──
+    LaunchedEffect(resumed) {
+        while (resumed && isActive) {
             val status = withContext(Dispatchers.IO) {
                 EasyTierPlugin.getPeerStatus(context)
             }
@@ -395,12 +403,16 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
         } catch (e: Throwable) {
             "Error: ${e.javaClass.simpleName}: ${e.message}"
         }
+        // Redact any embedded credentials / secrets before showing on screen or
+        // copying to the clipboard (raw collectNetworkInfos JSON is NOT otherwise
+        // passed through EasyTierPlugin.log()'s redaction).
+        val redacted = info?.let { EasyTierPlugin.redactJsonForDisplay(it) }
         val displayText = if (info.isNullOrBlank()) {
             context.getString(R.string.easytier_network_info_empty)
         } else {
             try {
                 val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
-                val parsed = com.google.gson.JsonParser.parseString(info)
+                val parsed = com.google.gson.JsonParser.parseString(redacted)
                 gson.toJson(parsed)
             } catch (e: Exception) {
                 info
