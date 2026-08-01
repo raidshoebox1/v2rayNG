@@ -80,6 +80,19 @@ class EasyTierPlugin(private val context: Context) {
         /** Outbound tag used in Xray-core routing. */
         const val OUTBOUND_TAG = "easytier"
 
+        /**
+         * Baseline CIDRs that are routed through EasyTier. These cover the common
+         * EasyTier virtual-network ranges across all RFC1918 space. Routing the
+         * whole private range is intentional: EasyTier's virtual LAN uses these
+         * ranges and the mesh must be reachable even when per-CIDR discovery has
+         * not converged yet.
+         */
+        val DEFAULT_LAN_CIDRS = listOf(
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16"
+        )
+
         // ------------------------------------------------------------------
         // Tuning constants (centralized for easy adjustment)
         // ------------------------------------------------------------------
@@ -473,45 +486,6 @@ class EasyTierPlugin(private val context: Context) {
         fun clearMeshCidrsCache() {
             meshCidrsCache = null
             meshCidrsCacheTime = 0L
-        }
-
-        /**
-         * Convert a configured host virtual IPv4 into its /24 subnet
-         * (EasyTier's default virtual-network prefix). Returns null if the
-         * value is not a valid IPv4.
-         */
-        private fun hostToSubnet24(ip: String): String? {
-            val octets = ip.trim().split(".")
-            if (octets.size != 4) return null
-            val o = octets.map { it.toIntOrNull() ?: return null }
-            if (o.any { it !in 0..255 }) return null
-            return "${o[0]}.${o[1]}.${o[2]}.0/24"
-        }
-
-        /**
-         * The mesh IPv4 subnets that should actually be routed through EasyTier.
-         *
-         * Consists of:
-         *  - the configured virtual-IP /24 subnet (known before EasyTier starts,
-         *    so the VPN tun route can be added at setup time), and
-         *  - any discovered mesh CIDRs reported by a running instance
-         *    (safe-filtered).
-         *
-         * For auto-assign users (no explicit virtual IP) the discovered CIDRs
-         * alone are used once the instance is running and has converged.
-         *
-         * Intentionally does NOT blanket-route the whole RFC1918 space, so
-         * enabling EasyTier no longer hijacks the device's real LAN
-         * (gateway/router/NAS) before EasyTier has actually claimed those routes.
-         */
-        @JvmStatic
-        fun getEffectiveRoutingCidrs(context: Context): List<String> {
-            val cidrs = LinkedHashSet<String>()
-            EasyTierSettingsManager.getVirtualIp(context)?.let {
-                hostToSubnet24(it)?.let { s -> if (isSafeMeshCidr(s)) cidrs.add(s) }
-            }
-            getMeshCidrsStatic().forEach { if (isSafeMeshCidr(it)) cidrs.add(it) }
-            return cidrs.toList()
         }
 
         // ------------------------------------------------------------------

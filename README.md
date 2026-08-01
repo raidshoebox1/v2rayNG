@@ -103,9 +103,9 @@ App traffic → VpnService → Xray-core routing
 
 Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); topology changes may take up to 5 s to propagate into routing rules.
 
-### Routing scope
+### Routing
 
-Only the mesh subnets EasyTier actually owns are routed through it: the configured **virtual-IP subnet** (default `a.b.c.0/24`) plus any **discovered mesh CIDRs** reported by a running instance. Enabling EasyTier does **not** blanket-route the whole RFC1918 space, so a device's real LAN (gateway/router/NAS on 10.x/172.16-31.x/192.168.x) is left untouched unless EasyTier claims those routes. For auto-assign users (no explicit virtual IP), routing is driven purely by the discovered mesh CIDRs once the instance is running and has converged.
+When EasyTier is enabled, the standard RFC1918 private ranges (10/8, 172.16/12, 192.168/16) plus any dynamically discovered mesh CIDRs are routed through the EasyTier SOCKS5 outbound (injected ahead of the catch-all rule). This means enabling EasyTier routes all private-range traffic to the mesh: the EasyTier virtual LAN is reachable even before per-CIDR discovery converges. **Note:** because EasyTier's virtual network uses the same private ranges as a real LAN, this effectively routes LAN traffic through the mesh while enabled; disable EasyTier (or use routing rules) if you need normal bypass-lan LAN behavior at the same time.
 
 ### Security
 
