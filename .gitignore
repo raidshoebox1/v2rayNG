@@ -70,3 +70,17 @@ V2rayNG/app/google-services.json
 # Ignore OS-specific files
 Thumbs.db
 .DS_Store
+
+# --- Local secrets / credentials (defense-in-depth) ---
+# The real GitHub token lives in .git/credentials-fork, which is physically
+# untracked (inside .git/). These rules block any token/secret file that is
+# accidentally placed in the work tree from ever being committed.
+/credentials-fork
+/.git-credentials
+*credentials*.local
+*.git-credentials
+github_token*
+*token*.local
+*.pat
+/.env
+/.env.*
