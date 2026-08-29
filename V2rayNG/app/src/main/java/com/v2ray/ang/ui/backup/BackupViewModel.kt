@@ -249,4 +249,4 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
                 backupDir.deleteRecursively()
             }
         }
-
+}
