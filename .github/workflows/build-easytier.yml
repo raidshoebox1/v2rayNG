@@ -62,6 +62,14 @@ jobs:
     name: Build JNI .so (${{ matrix.arch }})
     runs-on: ubuntu-latest
     if: ${{ !inputs.build_apk_only }}
+    env:
+      # NDK r30+ <sys/cdefs.h> rejects the unversioned Android target triples that
+      # EasyTier's kcp-sys crate passes to bindgen ("Unversioned target triples are
+      # not supported!"), failing the Rust JNI build. Keep r29 for the Rust matrix;
+      # the APK job still uses the workflow-level r30 required by AGP 9.x.
+      # Remove this override once kcp-sys/EasyTier emits API-versioned triples
+      # (e.g. aarch64-linux-android24) to bindgen.
+      NDK_VERSION: "29.0.14206865"
     strategy:
       fail-fast: false
       matrix:
@@ -103,7 +111,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "EasyTier -> target"
-          key: ${{ matrix.arch }}-ndk-${{ env.NDK_VERSION }}-${{ hashFiles('EasyTier/**/Cargo.lock', 'EasyTier/**/Cargo.toml') }}
+          key: ${{ matrix.arch }}-${{ hashFiles('EasyTier/**/Cargo.lock', 'EasyTier/**/Cargo.toml') }}
 
       - name: Install system dependencies (protoc)
         run: |
