@@ -55,7 +55,7 @@ fi
 if [[ -z "$ANDROID_NDK_HOME" && -z "$ANDROID_NDK_ROOT" && -z "$NDK_HOME" ]]; then
     echo "ERROR: None of ANDROID_NDK_HOME, ANDROID_NDK_ROOT, or NDK_HOME is set."
     echo "Set one to your NDK path, e.g.:"
-    echo "  export ANDROID_NDK_HOME=\$HOME/Android/Sdk/ndk/29.0.14206865"
+    echo "  export ANDROID_NDK_HOME=\$HOME/Android/Sdk/ndk/30.0.16248370"
     exit 1
 fi
 

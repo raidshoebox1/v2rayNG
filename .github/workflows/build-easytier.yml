@@ -50,7 +50,7 @@ env:
   # Rust toolchain version matching EasyTier's rust-toolchain.toml
   RUST_VERSION: "1.95"
   # Android NDK version (matches v2rayNG's build.yml)
-  NDK_VERSION: "29.0.14206865"
+  NDK_VERSION: "30.0.16248370"
   # ABI mapping: Android ABI -> Rust target triple
   # All four ABIs are built by default; override via abi_filters input
 
@@ -103,7 +103,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "EasyTier -> target"
-          key: ${{ matrix.arch }}-${{ hashFiles('EasyTier/**/Cargo.lock', 'EasyTier/**/Cargo.toml') }}
+          key: ${{ matrix.arch }}-ndk-${{ env.NDK_VERSION }}-${{ hashFiles('EasyTier/**/Cargo.lock', 'EasyTier/**/Cargo.toml') }}
 
       - name: Install system dependencies (protoc)
         run: |
@@ -270,7 +270,7 @@ jobs:
           out-file-path: V2rayNG/app/libs/
 
       - name: Setup Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6.1.0
         with:
           distribution: 'temurin'
           java-version: '21'

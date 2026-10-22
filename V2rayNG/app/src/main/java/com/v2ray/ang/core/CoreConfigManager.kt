@@ -165,7 +165,7 @@ object CoreConfigManager {
             }
         }
 
-        return JsonUtil.toJsonPretty(json)?.let { 
+        return JsonUtil.toJsonPretty(json)?.let {
             // Inject EasyTier outbound for custom configs too
             val withEasyTier = injectEasyTierIntoCustomConfig(configContext.context, it)
             ConfigResult(true, configContext.guid, withEasyTier)
