@@ -160,6 +160,52 @@ class EasyTierRoutePlannerTest {
     }
 
     @Test
+    fun `peer status uses the snapshot routes for mesh CIDRs`() {
+        val json = """
+            {
+              "map": {
+                "v2rayng_plugin": {
+                  "running": true,
+                  "my_node_info": {
+                    "virtual_ipv4": {
+                      "address": { "addr": 177246209 },
+                      "network_length": 24
+                    }
+                  },
+                  "routes": [
+                    {
+                      "peer_id": 1,
+                      "hostname": "router32",
+                      "ipv4_addr": {
+                        "address": { "addr": 177246210 },
+                        "network_length": 24
+                      },
+                      "proxy_cidrs": ["192.168.32.0/24"],
+                      "path_latency": 2000
+                    }
+                  ],
+                  "peers": [
+                    {
+                      "peer_id": 1,
+                      "directly_connected_conns": [{}],
+                      "conns": []
+                    }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+
+        val status = EasyTierPlugin.parsePeerStatusJson(json)
+        requireNotNull(status)
+        assertTrue(status.running)
+        assertEquals(1, status.peers.size)
+        assertEquals(listOf("192.168.32.0/24"), status.peers[0].proxyCidrs)
+        assertTrue(status.meshCidrs.contains("10.144.144.0/24"))
+        assertTrue(status.meshCidrs.contains("192.168.32.0/24"))
+    }
+
+    @Test
     fun `safe mesh cidr validation`() {
         assertTrue(EasyTierRoutePlanner.isSafeMeshCidr("10.0.0.0/8"))
         assertTrue(EasyTierRoutePlanner.isSafeMeshCidr("192.168.1.0/24"))
