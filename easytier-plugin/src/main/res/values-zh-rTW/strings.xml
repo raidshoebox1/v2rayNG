@@ -102,4 +102,5 @@
     <string name="easytier_warning_extra_route_unadvertised">額外路由 %1$s 未被任何 EasyTier 對端宣告，請檢查路由器的 proxy_networks 設定。</string>
     <string name="easytier_warning_broad_mesh_cidr">有對端宣告了大網段 %1$s；建議每個站點只宣告自己的 /24 子網，避免 mesh 路由歧義。</string>
     <string name="easytier_warning_per_app_proxy">已啟用分應用程式代理；繞過 VPN 的應用程式無法使用 EasyTier 路由。請檢查 KDE Connect 和 LocalSend 是否在繞行清單中。</string>
+    <string name="easytier_peer_proxy_cidrs">代理網段：%1$s</string>
 </resources>

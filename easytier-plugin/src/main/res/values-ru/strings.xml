@@ -12,4 +12,5 @@
     <string name="easytier_warning_extra_route_unadvertised">Дополнительный маршрут %1$s не объявлен ни одним пиром EasyTier; проверьте proxy_networks на роутерах.</string>
     <string name="easytier_warning_broad_mesh_cidr">Пир объявляет широкую сеть %1$s; лучше использовать proxy_networks /24 для каждого сайта, чтобы избежать неоднозначной маршрутизации mesh.</string>
     <string name="easytier_warning_per_app_proxy">Включён прокси для отдельных приложений; приложения в обходе VPN не используют маршруты EasyTier. Проверьте список обхода для KDE Connect и LocalSend.</string>
+    <string name="easytier_peer_proxy_cidrs">прокси: %1$s</string>
 </resources>

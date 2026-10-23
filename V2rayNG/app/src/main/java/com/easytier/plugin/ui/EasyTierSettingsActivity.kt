@@ -606,6 +606,16 @@ private fun formatStatus(context: Context, status: EasyTierPlugin.MeshStatus?): 
                 sb.append(context.getString(R.string.easytier_peer_relay))
             }
             sb.append("\n")
+            if (peer.proxyCidrs.isNotEmpty()) {
+                sb.append("    ")
+                sb.append(
+                    context.getString(
+                        R.string.easytier_peer_proxy_cidrs,
+                        peer.proxyCidrs.joinToString(", ")
+                    )
+                )
+                sb.append("\n")
+            }
         }
     }
 
