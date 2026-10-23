@@ -20,9 +20,12 @@ import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.NetworkRouteUtil
 import com.v2ray.ang.util.PackageUidResolver
 import com.v2ray.ang.util.Utils
 import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierRoutePlan
+import com.easytier.plugin.EasyTierRoutePlanner
 import com.easytier.plugin.EasyTierSettingsManager
 
 object CoreConfigManager {
@@ -1327,65 +1330,101 @@ object CoreConfigManager {
     //region EasyTier Plugin Integration
 
     /**
+     * Build a precise EasyTier route plan from the current settings and any
+     * mesh CIDRs discovered by the running instance.
+     *
+     * The VpnService interface is created before EasyTier starts, so callers
+     * must also consider the persisted last-known CIDRs.  Keeping the
+     * planning rules in one place ensures the VPN route table and the Xray
+     * routing rules never disagree.
+     */
+    private fun buildEasyTierRoutePlan(context: Context): EasyTierRoutePlan? {
+        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return null
+        if (!etConfig.enabled) return null
+
+        val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
+        val meshCidrs = try {
+            EasyTierPlugin.getMeshCidrsStatic()
+        } catch (e: Throwable) {
+            LogUtil.w(AppConfig.TAG, "EasyTier: failed to get live mesh CIDRs (non-fatal)", e)
+            emptyList()
+        }
+        val lastKnown = EasyTierPlugin.getLastKnownMeshCidrs(context)
+        return EasyTierRoutePlanner.plan(
+            localLanCidrs = NetworkRouteUtil.collectLocalLanCidrs(context),
+            vpnClientCidr = "${vpnConfig.ipv4Client}/30",
+            meshCidrs = meshCidrs,
+            virtualIp = etConfig.virtualIp,
+            extraCidrs = EasyTierSettingsManager.getExtraRoutes(context),
+            lastKnownCidrs = lastKnown,
+            bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(context)
+        )
+    }
+
+    /**
      * Inject EasyTier SOCKS5 outbound and routing rules into the Xray config.
      *
-     * When the EasyTier plugin is enabled, a SOCKS5 outbound pointing to the
-     * local EasyTier listener is appended, and routing rules for LAN/mesh
-     * CIDRs are prepended to direct internal traffic through EasyTier.
+     * A direct rule for the device's own LAN is inserted before the EasyTier
+     * rule so LocalSend, KDE Connect and mDNS keep working.  Only the actual
+     * mesh/remote CIDRs are routed through EasyTier; the old whole-private-
+     * range baseline is deliberately not used.
      */
     private fun injectEasyTier(context: Context, v2rayConfig: V2rayConfig) {
-        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return
-        if (!etConfig.enabled) return
+        val plan = buildEasyTierRoutePlan(context) ?: return
+        if (plan.easyTierCidrs.isEmpty() && plan.localLanCidrs.isEmpty()) return
 
-        // Avoid duplicate outbounds
-        if (v2rayConfig.outbounds.any { it.tag == EasyTierPlugin.OUTBOUND_TAG }) {
-            LogUtil.d(AppConfig.TAG, "EasyTier outbound already present, skipping injection")
-            return
-        }
-
-        // Build SOCKS5 outbound for EasyTier
-        val socks5Outbound = V2rayConfig.OutboundBean(
-            tag = EasyTierPlugin.OUTBOUND_TAG,
-            protocol = "socks",
-            settings = V2rayConfig.OutboundBean.OutSettingsBean(
-                address = "127.0.0.1",
-                port = etConfig.socks5Port
+        if (v2rayConfig.outbounds.none { it.tag == EasyTierPlugin.OUTBOUND_TAG }) {
+            val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return
+            val socks5Outbound = V2rayConfig.OutboundBean(
+                tag = EasyTierPlugin.OUTBOUND_TAG,
+                protocol = "socks",
+                settings = V2rayConfig.OutboundBean.OutSettingsBean(
+                    address = "127.0.0.1",
+                    port = etConfig.socks5Port
+                )
             )
-        )
-        v2rayConfig.outbounds.add(socks5Outbound)
-        LogUtil.i(AppConfig.TAG, "EasyTier: injected SOCKS5 outbound on 127.0.0.1:${etConfig.socks5Port}")
-
-        // Build routing rules: DEFAULT_LAN_CIDRs as baseline + mesh CIDRs from EasyTier.
-        // DEFAULT_LAN_CIDRs covers the common private ranges used by EasyTier virtual
-        // networks (10.x, 172.16-31.x, 192.168.x).  This ensures traffic to the virtual
-        // LAN is routed through EasyTier even when mesh CIDR discovery returns empty
-        // (e.g. peers not yet converged, or proxy_cidrs not configured).
-        val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
-
-        // Append any mesh CIDRs discovered by EasyTier (filtered for safety).
-        // getMeshCidrsStatic() calls the static JNI directly (does not require a running
-        // plugin instance), but only returns meaningful results when EasyTier is running.
-        try {
-            val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
-            if (meshCidrs.isNotEmpty()) {
-                lanCidrs.addAll(meshCidrs.filter { it !in lanCidrs })
-                LogUtil.d(AppConfig.TAG, "EasyTier: discovered mesh CIDRs: $meshCidrs")
-            }
-        } catch (e: Throwable) {
-            LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs (non-fatal)", e)
+            v2rayConfig.outbounds.add(socks5Outbound)
+            LogUtil.i(AppConfig.TAG, "EasyTier: injected SOCKS5 outbound on 127.0.0.1:${etConfig.socks5Port}")
         }
 
-        val easyTierRule = V2rayConfig.RoutingBean.RulesBean(
-            type = "field",
-            ip = lanCidrs,
-            outboundTag = EasyTierPlugin.OUTBOUND_TAG
-        )
-        // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority
-        // over the EasyTier CIDR rule.  If no dns-out rule exists, insert at index 0
-        // so EasyTier rules still take priority over the catch-all proxy rule.
+        if (plan.conflicts.isNotEmpty()) {
+            LogUtil.i(
+                AppConfig.TAG,
+                "EasyTier: route conflicts resolved as local-first: " +
+                    plan.conflicts.joinToString { "${it.cidr} (${it.reason})" }
+            )
+        }
+
+        // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority.
+        // The direct LAN rule must come before the EasyTier rule.
         val insertIndex = v2rayConfig.routing.rules.indexOfLast { it.outboundTag == "dns-out" } + 1
-        v2rayConfig.routing.rules.add(insertIndex, easyTierRule)
-        LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule at index $insertIndex for CIDRs: $lanCidrs")
+        var nextIndex = insertIndex
+        if (plan.localLanCidrs.isNotEmpty() &&
+            v2rayConfig.routing.rules.none { it.outboundTag == AppConfig.TAG_DIRECT && it.ip == plan.localLanCidrs }
+        ) {
+            v2rayConfig.routing.rules.add(
+                nextIndex,
+                V2rayConfig.RoutingBean.RulesBean(
+                    type = "field",
+                    ip = ArrayList(plan.localLanCidrs),
+                    outboundTag = AppConfig.TAG_DIRECT
+                )
+            )
+            nextIndex++
+        }
+        if (plan.easyTierCidrs.isNotEmpty() &&
+            v2rayConfig.routing.rules.none { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }
+        ) {
+            v2rayConfig.routing.rules.add(
+                nextIndex,
+                V2rayConfig.RoutingBean.RulesBean(
+                    type = "field",
+                    ip = ArrayList(plan.easyTierCidrs),
+                    outboundTag = EasyTierPlugin.OUTBOUND_TAG
+                )
+            )
+            LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule at index $nextIndex for CIDRs: ${plan.easyTierCidrs}")
+        }
     }
 
     /**
@@ -1397,81 +1436,81 @@ object CoreConfigManager {
      * @return Modified JSON string, or the original if EasyTier is disabled or injection fails.
      */
     private fun injectEasyTierIntoCustomConfig(context: Context, json: String): String {
-        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return json
-        if (!etConfig.enabled) return json
+        val plan = buildEasyTierRoutePlan(context) ?: return json
+        if (plan.easyTierCidrs.isEmpty() && plan.localLanCidrs.isEmpty()) return json
 
         return try {
             val obj = JsonUtil.parseString(json)?.takeIf { it.isJsonObject }?.asJsonObject ?: return json
 
-            // Check if EasyTier outbound already exists
             val outbounds = obj.get("outbounds")?.takeIf { it.isJsonArray }?.asJsonArray
                 ?: JsonArray().also { obj.add("outbounds", it) }
 
-            if (outbounds.any { e ->
+            val hasEasyTierOutbound = outbounds.any { e ->
                 e.isJsonObject && e.asJsonObject.get("tag")?.asString == EasyTierPlugin.OUTBOUND_TAG
-            }) {
-                return json // already injected
             }
-
-            // Build SOCKS5 outbound JSON
-            val socks5Outbound = com.google.gson.JsonObject().apply {
-                addProperty("tag", EasyTierPlugin.OUTBOUND_TAG)
-                addProperty("protocol", "socks")
-                add("settings", com.google.gson.JsonObject().apply {
-                    add("servers", com.google.gson.JsonArray().apply {
-                        add(com.google.gson.JsonObject().apply {
-                            addProperty("address", "127.0.0.1")
-                            addProperty("port", etConfig.socks5Port)
+            if (!hasEasyTierOutbound) {
+                val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return json
+                val socks5Outbound = com.google.gson.JsonObject().apply {
+                    addProperty("tag", EasyTierPlugin.OUTBOUND_TAG)
+                    addProperty("protocol", "socks")
+                    add("settings", com.google.gson.JsonObject().apply {
+                        add("servers", com.google.gson.JsonArray().apply {
+                            add(com.google.gson.JsonObject().apply {
+                                addProperty("address", "127.0.0.1")
+                                addProperty("port", etConfig.socks5Port)
+                            })
                         })
                     })
-                })
+                }
+                outbounds.add(socks5Outbound)
             }
-            outbounds.add(socks5Outbound)
 
-            // Build routing rule for LAN CIDRs
             val routing = obj.get("routing")?.takeIf { it.isJsonObject }?.asJsonObject
                 ?: com.google.gson.JsonObject().also { obj.add("routing", it) }
             val rules = routing.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
                 ?: JsonArray().also { routing.add("rules", it) }
 
-            // Build routing rule: DEFAULT_LAN_CIDRs as baseline + mesh CIDRs from EasyTier.
-            val lanCidrs = ArrayList(EasyTierPlugin.DEFAULT_LAN_CIDRS)
-            // Append any mesh CIDRs discovered by EasyTier (filtered for safety).
-            try {
-                val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
-                if (meshCidrs.isNotEmpty()) {
-                    lanCidrs.addAll(meshCidrs.filter { it !in lanCidrs })
-                }
-            } catch (e: Throwable) {
-                LogUtil.w(AppConfig.TAG, "EasyTier: failed to get mesh CIDRs for custom config (non-fatal)", e)
-            }
-
-            val easyTierRule = com.google.gson.JsonObject().apply {
-                addProperty("type", "field")
-                add("ip", Gson().toJsonTree(lanCidrs))
-                addProperty("outboundTag", EasyTierPlugin.OUTBOUND_TAG)
-            }
-            // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority
-            // over the EasyTier CIDR rule.  If no dns-out rule exists, insert at index 0.
+            var hasEasyTierRule = false
+            var hasDirectLanRule = false
             var dnsOutIndex = -1
             for (i in 0 until rules.size()) {
                 val rule = rules[i]?.takeIf { it.isJsonObject }?.asJsonObject ?: continue
-                if (rule.get("outboundTag")?.asString == "dns-out") {
-                    dnsOutIndex = i
+                when (rule.get("outboundTag")?.asString) {
+                    EasyTierPlugin.OUTBOUND_TAG -> hasEasyTierRule = true
+                    "dns-out" -> dnsOutIndex = i
+                    AppConfig.TAG_DIRECT -> {
+                        if (jsonRuleIps(rule) == plan.localLanCidrs.toSet()) {
+                            hasDirectLanRule = true
+                        }
+                    }
                 }
             }
+
+            val toInsert = mutableListOf<com.google.gson.JsonObject>()
+            if (plan.localLanCidrs.isNotEmpty() && !hasDirectLanRule) {
+                toInsert.add(com.google.gson.JsonObject().apply {
+                    addProperty("type", "field")
+                    add("ip", Gson().toJsonTree(plan.localLanCidrs))
+                    addProperty("outboundTag", AppConfig.TAG_DIRECT)
+                })
+            }
+            if (plan.easyTierCidrs.isNotEmpty() && !hasEasyTierRule) {
+                toInsert.add(com.google.gson.JsonObject().apply {
+                    addProperty("type", "field")
+                    add("ip", Gson().toJsonTree(plan.easyTierCidrs))
+                    addProperty("outboundTag", EasyTierPlugin.OUTBOUND_TAG)
+                })
+            }
+            if (toInsert.isEmpty()) return JsonUtil.toJsonPretty(obj) ?: json
+
+            val insertAt = dnsOutIndex + 1
             val newRules = com.google.gson.JsonArray()
-            if (dnsOutIndex < 0) {
-                // No dns-out rule — insert EasyTier rule first
-                newRules.add(easyTierRule)
-                rules.forEach { newRules.add(it) }
-            } else {
-                // Insert after the last dns-out rule
-                for (i in 0 until rules.size()) {
+            for (i in 0..rules.size()) {
+                if (i == insertAt) {
+                    toInsert.forEach { newRules.add(it) }
+                }
+                if (i < rules.size()) {
                     newRules.add(rules[i])
-                    if (i == dnsOutIndex) {
-                        newRules.add(easyTierRule)
-                    }
                 }
             }
             routing.remove("rules")
@@ -1482,6 +1521,14 @@ object CoreConfigManager {
             LogUtil.e(AppConfig.TAG, "EasyTier: failed to inject into custom config", e)
             json
         }
+    }
+
+    /** Extract the `ip` array of a custom-config routing rule as a set. */
+    private fun jsonRuleIps(rule: JsonObject): Set<String> {
+        val array = rule.get("ip")?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptySet()
+        return array.mapNotNull { element ->
+            element.takeIf { it.isJsonPrimitive }?.asString
+        }.toSet()
     }
 
     //endregion

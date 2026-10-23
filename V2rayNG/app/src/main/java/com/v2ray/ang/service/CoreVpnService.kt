@@ -23,8 +23,10 @@ import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.root.RootLanSharing
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.NetworkRouteUtil
 import com.v2ray.ang.util.Utils
 import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierRoutePlanner
 import com.easytier.plugin.EasyTierSettingsManager
 import java.lang.ref.SoftReference
 import java.util.concurrent.atomic.AtomicBoolean
@@ -212,31 +214,41 @@ class CoreVpnService : VpnService(), ServiceControl {
                 val addr = it.split('/')
                 builder.addRoute(addr[0], addr[1].toInt())
             }
-            // When bypass-lan is enabled, private IP ranges (10.x, 172.16-31.x, 192.168.x)
-            // are excluded from VPN routing so they go direct. However, EasyTier mesh
-            // traffic uses these same private ranges and MUST go through the VPN tunnel
-            // to reach Xray-core's EasyTier SOCKS5 outbound. Add DEFAULT_LAN_CIDRs
-            // unconditionally (covering the common EasyTier virtual network ranges)
-            // and append any dynamically discovered mesh CIDRs.
+            // When bypass-lan is enabled, private IP ranges are excluded from VPN routing
+            // so they go direct. EasyTier mesh traffic uses private ranges too, so only
+            // add the CIDRs that actually belong to EasyTier. Never add 10/8, 172.16/12
+            // or 192.168/16 as a whole: that would capture the device's real LAN and
+            // break LocalSend / KDE Connect.
             try {
                 val etConfig = EasyTierSettingsManager.getEasyTierConfig(this)
                 if (etConfig != null && etConfig.enabled) {
-                    // Always add the default LAN CIDRs so Xray-core can route them to EasyTier
-                    EasyTierPlugin.DEFAULT_LAN_CIDRS.forEach { cidr ->
+                    val plan = EasyTierRoutePlanner.plan(
+                        localLanCidrs = NetworkRouteUtil.collectLocalLanCidrs(this),
+                        vpnClientCidr = "${vpnConfig.ipv4Client}/30",
+                        meshCidrs = EasyTierPlugin.getMeshCidrsStatic(),
+                        virtualIp = etConfig.virtualIp,
+                        extraCidrs = EasyTierSettingsManager.getExtraRoutes(this),
+                        lastKnownCidrs = EasyTierPlugin.getLastKnownMeshCidrs(this),
+                        bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(this)
+                    )
+                    plan.vpnRoutes.forEach { cidr ->
+                        if (cidr.contains(":") &&
+                            MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) != true
+                        ) {
+                            return@forEach
+                        }
                         val parts = cidr.split('/')
                         if (parts.size == 2) {
                             builder.addRoute(parts[0], parts[1].toInt())
                             LogUtil.d(AppConfig.TAG, "EasyTier: added VPN route for mesh CIDR: $cidr")
                         }
                     }
-                    // Also add any dynamically discovered mesh CIDRs
-                    val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
-                    meshCidrs.forEach { cidr ->
-                        val parts = cidr.split('/')
-                        if (parts.size == 2 && EasyTierPlugin.DEFAULT_LAN_CIDRS.none { it == cidr }) {
-                            builder.addRoute(parts[0], parts[1].toInt())
-                            LogUtil.d(AppConfig.TAG, "EasyTier: added VPN route for discovered mesh CIDR: $cidr")
-                        }
+                    if (plan.conflicts.isNotEmpty()) {
+                        LogUtil.i(
+                            AppConfig.TAG,
+                            "EasyTier: route conflicts resolved as local-first: " +
+                                plan.conflicts.joinToString { "${it.cidr} (${it.reason})" }
+                        )
                     }
                 }
             } catch (e: Throwable) {

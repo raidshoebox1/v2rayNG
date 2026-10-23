@@ -42,8 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierRoutePlanner
 import com.easytier.plugin.EasyTierSettingsManager
 import com.easytier.plugin.R
+import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.compose.AppTopBar
 import com.v2ray.ang.ui.compose.PreferenceGroupHeader
 import com.v2ray.ang.ui.compose.SettingsEditItem
@@ -54,6 +56,7 @@ import com.v2ray.ang.extension.toast
 import com.v2ray.ang.extension.toastError
 import com.v2ray.ang.extension.toastSuccess
 import com.v2ray.ang.ui.base.BaseComponentActivity
+import com.v2ray.ang.util.NetworkRouteUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -119,6 +122,7 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val invalidRouteFormat = stringResource(R.string.easytier_invalid_route, "%s")
 
     // ── Form state (rememberSaveable so values survive config changes) ──
     var enabled by rememberSaveable {
@@ -147,6 +151,12 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
     }
     var pauseOnScreenOff by rememberSaveable {
         mutableStateOf(EasyTierSettingsManager.isPauseOnScreenOff(context))
+    }
+    var bypassLocalLan by rememberSaveable {
+        mutableStateOf(EasyTierSettingsManager.isBypassLocalLan(context))
+    }
+    var extraRoutes by rememberSaveable {
+        mutableStateOf(EasyTierSettingsManager.getExtraRoutes(context).joinToString("\n"))
     }
 
     // ── Status panel state ──
@@ -219,6 +229,25 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                     EasyTierSettingsManager.setPauseOnScreenOff(context, it)
                 }
             )
+            SettingsSwitchItem(
+                title = stringResource(R.string.easytier_pref_bypass_local_lan_title),
+                summary = stringResource(R.string.easytier_pref_bypass_local_lan_summary),
+                checked = bypassLocalLan,
+                onCheckedChange = {
+                    bypassLocalLan = it
+                    EasyTierSettingsManager.setBypassLocalLan(context, it)
+                }
+            )
+            if (enabled && !SettingsManager.routingRulesetsBypassLan()) {
+                Text(
+                    text = stringResource(R.string.easytier_full_tunnel_warning),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp)
+                )
+            }
 
             // ── Network ──
             PreferenceGroupHeader(title = stringResource(R.string.easytier_pref_category_network))
@@ -257,6 +286,22 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                         EasyTierSettingsManager.setVirtualIp(context, trimmed.ifEmpty { null })
                     } else {
                         context.toastError(R.string.easytier_invalid_virtual_ip)
+                    }
+                }
+            )
+            SettingsEditItem(
+                title = stringResource(R.string.easytier_pref_extra_routes_title),
+                value = extraRoutes,
+                onValueChanged = { newValue ->
+                    val invalid = newValue.split('\n', ',', ' ', '\t', ';')
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .filter { !EasyTierRoutePlanner.isSafeMeshCidr(it) }
+                    if (invalid.isEmpty()) {
+                        extraRoutes = newValue
+                        EasyTierSettingsManager.setExtraRoutes(context, EasyTierRoutePlanner.parseList(newValue))
+                    } else {
+                        context.toastError(invalidRouteFormat.format(invalid.first()))
                     }
                 }
             )
@@ -561,6 +606,39 @@ private fun formatStatus(context: Context, status: EasyTierPlugin.MeshStatus?): 
         for (cidr in status.meshCidrs) {
             sb.append("  ").append(cidr).append("\n")
         }
+    }
+
+    val localLan = NetworkRouteUtil.collectLocalLanCidrs(context)
+    if (localLan.isNotEmpty()) {
+        sb.append(context.getString(R.string.easytier_status_local_lan))
+        sb.append("\n")
+        for (cidr in localLan) {
+            sb.append("  ").append(cidr).append("\n")
+        }
+    }
+
+    try {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = localLan,
+            vpnClientCidr = SettingsManager.getCurrentVpnInterfaceAddressConfig().ipv4Client + "/30",
+            meshCidrs = status.meshCidrs,
+            virtualIp = status.virtualIp,
+            extraCidrs = EasyTierSettingsManager.getExtraRoutes(context),
+            bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(context)
+        )
+        if (plan.easyTierCidrs.isNotEmpty()) {
+            sb.append(context.getString(R.string.easytier_status_easytier_routes))
+            sb.append("\n")
+            for (cidr in plan.easyTierCidrs) {
+                sb.append("  ").append(cidr).append("\n")
+            }
+        }
+        for (conflict in plan.conflicts) {
+            sb.append(context.getString(R.string.easytier_route_conflict, conflict.cidr))
+            sb.append("\n")
+        }
+    } catch (e: Throwable) {
+        // Status display is best-effort; never let a planning error break the UI.
     }
 
     return sb.toString().trimEnd()

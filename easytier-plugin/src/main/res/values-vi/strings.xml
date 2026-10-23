@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="easytier_pref_bypass_local_lan_title">Giữ mạng LAN cục bộ trực tiếp</string>
+    <string name="easytier_pref_bypass_local_lan_summary">Lưu lượng đến mạng Wi-Fi hoặc Ethernet của thiết bị này vẫn đi trực tiếp, để LocalSend, KDE Connect và mDNS tiếp tục hoạt động. Chỉ tắt nếu bạn muốn lưu lượng LAN cục bộ đi qua mesh.</string>
+    <string name="easytier_pref_extra_routes_title">Tuyến EasyTier bổ sung</string>
+    <string name="easytier_full_tunnel_warning">EasyTier đang bật với VPN toàn phần. Khám phá LAN (mDNS/broadcast) có thể vẫn lỗi; hãy bật Bỏ qua LAN trong chế độ VPN.</string>
+    <string name="easytier_status_local_lan">LAN cục bộ (trực tiếp):</string>
+    <string name="easytier_status_easytier_routes">Tuyến EasyTier:</string>
+    <string name="easytier_route_conflict">Xung đột tuyến: %1$s</string>
+    <string name="easytier_invalid_route">CIDR không hợp lệ: %1$s</string>
+</resources>

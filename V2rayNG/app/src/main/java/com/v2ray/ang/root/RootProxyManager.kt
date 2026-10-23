@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Process
 import android.util.AtomicFile
 import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierRoutePlanner
 import com.easytier.plugin.EasyTierSettingsManager
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.handler.MmkvManager
@@ -12,6 +13,7 @@ import com.v2ray.ang.root.RootProxyManager.TABLE
 import com.v2ray.ang.root.RootProxyManager.TUN
 import com.v2ray.ang.root.RootProxyManager.teardown
 import com.v2ray.ang.util.LogUtil
+import com.v2ray.ang.util.NetworkRouteUtil
 import com.v2ray.ang.util.PackageUidResolver
 import com.v2ray.ang.util.Utils
 import java.io.File
@@ -254,6 +256,33 @@ object RootProxyManager {
     }
 
     /**
+     * Precise CIDRs that must be routed into the EasyTier SOCKS5 outbound.
+     *
+     * Root mode runs after [com.v2ray.ang.core.CoreServiceManager] has started
+     * EasyTier, so the live CIDR list is usually available; the persisted
+     * last-known list covers the first moments after a restart.
+     */
+    private fun buildEasyTierRootCidrs(context: Context, ipv6: Boolean): List<String> {
+        val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return emptyList()
+        if (!etConfig.enabled) return emptyList()
+        return try {
+            val plan = EasyTierRoutePlanner.plan(
+                localLanCidrs = NetworkRouteUtil.collectLocalLanCidrs(context),
+                vpnClientCidr = AppConfig.ROOT_TUN_ADDR_V4,
+                meshCidrs = EasyTierPlugin.getMeshCidrsStatic(),
+                virtualIp = etConfig.virtualIp,
+                extraCidrs = EasyTierSettingsManager.getExtraRoutes(context),
+                lastKnownCidrs = EasyTierPlugin.getLastKnownMeshCidrs(context),
+                bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(context)
+            )
+            plan.easyTierCidrs.filter { it.contains(":") == ipv6 }
+        } catch (e: Throwable) {
+            LogUtil.w(AppConfig.TAG, "EasyTier: failed to build root route plan", e)
+            emptyList()
+        }
+    }
+
+    /**
      * mangle OUTPUT marking chain (ipv4/ipv6). Mirrors VpnService's capture behavior:
      * - all-apps (no per-app): mark EVERY remaining uid (incl uid 0 + all system uids), so
      *   nothing is missed;
@@ -291,46 +320,21 @@ object RootProxyManager {
             // The MARK survives a later RETURN, so the marked query still routes into the tun.
             appendLine("$cmd -t mangle -A $CHAIN -p udp --dport 53 -j MARK --set-xmark $MARK")
             appendLine("$cmd -t mangle -A $CHAIN -p tcp --dport 53 -j MARK --set-xmark $MARK")
+            // EasyTier mesh CIDRs must be marked BEFORE the private-range RETURN rules:
+            // a RETURN in a user chain stops processing the rest of that chain, so the
+            // old placement after the RETURNs made the EasyTier marks unreachable.
+            // The plan has already subtracted the device's own LAN, so local services
+            // stay direct.
+            val easyTierCidrs = buildEasyTierRootCidrs(context, ipv6 = cmd == "ip6tables")
+            easyTierCidrs.forEach { cidr ->
+                appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
+            }
+            if (easyTierCidrs.isNotEmpty()) {
+                LogUtil.d(AppConfig.TAG, "EasyTier: re-marked ${easyTierCidrs.size} mesh CIDRs in root mangle chain ($cmd)")
+            }
             // keep LAN / private destinations direct (per-family CIDR list)
             val cidrs = if (cmd == "ip6tables") bypassCidrsV6 else bypassCidrs
             cidrs.forEach { appendLine("$cmd -t mangle -A $CHAIN -d $it -j RETURN") }
-            // EasyTier mesh CIDRs must NOT be bypassed: re-mark them so they route into
-            // the tun even though they fall inside the private ranges above. This is
-            // only needed for IPv4 (EasyTier mesh uses v4 by default).
-            // Inject DEFAULT_LAN_CIDRs unconditionally (covers common EasyTier virtual
-            // network ranges) plus any dynamically discovered mesh CIDRs.
-            if (cmd == "iptables") {
-                try {
-                    val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
-                    if (etConfig != null && etConfig.enabled) {
-                        val meshCidrs = EasyTierPlugin.DEFAULT_LAN_CIDRS +
-                            EasyTierPlugin.getMeshCidrsStatic().filter { !it.contains(":") && it !in EasyTierPlugin.DEFAULT_LAN_CIDRS }
-                        meshCidrs.forEach { cidr ->
-                            appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
-                        }
-                        LogUtil.d(AppConfig.TAG, "EasyTier: re-marked ${meshCidrs.size} mesh CIDRs in root mangle chain (v4)")
-                    }
-                } catch (e: Throwable) {
-                    LogUtil.w(AppConfig.TAG, "EasyTier: failed to re-mark mesh CIDRs in root mode", e)
-                }
-            }
-            // IPv6 mesh CIDRs: re-mark so they route into the tun instead of being
-            // bypassed by the v6 RETURN rules above.
-            if (cmd == "ip6tables") {
-                try {
-                    val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
-                    if (etConfig != null && etConfig.enabled) {
-                        val meshCidrs = EasyTierPlugin.getMeshCidrsStatic()
-                            .filter { it.contains(":") } // IPv6 only for ip6tables
-                        meshCidrs.forEach { cidr ->
-                            appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
-                        }
-                        LogUtil.d(AppConfig.TAG, "EasyTier: re-marked ${meshCidrs.size} mesh CIDRs in root mangle chain (v6)")
-                    }
-                } catch (e: Throwable) {
-                    LogUtil.w(AppConfig.TAG, "EasyTier: failed to re-mark v6 mesh CIDRs in root mode", e)
-                }
-            }
             if (allowMode) {
                 // Proxy ONLY the explicitly selected apps. If nothing resolved (e.g. the
                 // selected packages failed to resolve to uids at early boot), mark nothing
@@ -477,15 +481,14 @@ object RootProxyManager {
             appendLine("ip rule add iif $TUN goto 6000 pref 5020 2>/dev/null || true")
             // EasyTier mesh CIDRs must go through the tun (not direct via main table).
             // Add higher-priority rules for mesh CIDRs BEFORE the LAN-direct rules below.
-            // Inject DEFAULT_LAN_CIDRs unconditionally (covers common EasyTier virtual
-            // network ranges) plus any dynamically discovered mesh CIDRs.
+            // Only the precise mesh/remote networks are used; the device's own LAN has
+            // already been subtracted by the planner.
             try {
                 val etConfig = EasyTierSettingsManager.getEasyTierConfig(context)
                 if (etConfig != null && etConfig.enabled) {
-                    val meshCidrs = EasyTierPlugin.DEFAULT_LAN_CIDRS +
-                        EasyTierPlugin.getMeshCidrsStatic().filter { !it.contains(":") && it !in EasyTierPlugin.DEFAULT_LAN_CIDRS }
-                    meshCidrs.forEachIndexed { index, cidr ->
-                        appendLine("ip rule add to $cidr lookup $TABLE pref $((5024 - index)) 2>/dev/null || true")
+                    val meshCidrs = buildEasyTierRootCidrs(context, ipv6 = false)
+                    meshCidrs.forEach { cidr ->
+                        appendLine("ip rule add to $cidr lookup $TABLE pref 5024 2>/dev/null || true")
                     }
                     LogUtil.d(AppConfig.TAG, "EasyTier: added ${meshCidrs.size} mesh CIDR ip-rules in LAN sharing setup")
                 }

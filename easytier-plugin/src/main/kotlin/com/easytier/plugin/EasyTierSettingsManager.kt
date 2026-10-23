@@ -45,8 +45,15 @@ object EasyTierSettingsManager {
     private const val MIGRATED_FLAG = "easytier_secret_migrated"
     private const val SNAPSHOT_FILE = "easytier_config.json"
 
+    /**
+     * Last known mesh CIDRs, written by the VPN process while EasyTier is
+     * running.  The VpnService interface is established before EasyTier starts,
+     * so the next start uses this file as a routing baseline.
+     */
+    private const val LAST_ROUTES_FILE = "easytier_last_routes.json"
+
     /** Schema version for backup/restore format. Increment when the JSON shape changes. */
-    private const val SCHEMA_VERSION = 1
+    private const val SCHEMA_VERSION = 2
 
     /** Backup/restore JSON key for the schema version. */
     private const val KEY_SCHEMA_VERSION = "__version"
@@ -63,6 +70,8 @@ object EasyTierSettingsManager {
     const val KEY_MTU = PREFIX + "mtu"
     const val KEY_LOG_LEVEL = PREFIX + "log_level"
     const val KEY_PAUSE_ON_SCREEN_OFF = PREFIX + "pause_on_screen_off"
+    const val KEY_BYPASS_LOCAL_LAN = PREFIX + "bypass_local_lan"
+    const val KEY_EXTRA_ROUTES = PREFIX + "extra_routes"
 
     // Defaults
     const val DEFAULT_SOCKS5_PORT = EasyTierPlugin.DEFAULT_SOCKS5_PORT
@@ -70,6 +79,9 @@ object EasyTierSettingsManager {
 
     /** Default for pause-on-screen-off: disabled (opt-in extreme power saving). */
     const val DEFAULT_PAUSE_ON_SCREEN_OFF = false
+
+    /** Keep the device's real LAN direct by default. */
+    const val DEFAULT_BYPASS_LOCAL_LAN = true
 
     private fun prefs(context: Context): SharedPreferences =
         PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
@@ -131,6 +143,8 @@ object EasyTierSettingsManager {
             addProperty(KEY_MTU, sp.getString(KEY_MTU, null) ?: "")
             addProperty(KEY_LOG_LEVEL, sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
             addProperty(KEY_PAUSE_ON_SCREEN_OFF, sp.getBoolean(KEY_PAUSE_ON_SCREEN_OFF, DEFAULT_PAUSE_ON_SCREEN_OFF))
+            addProperty(KEY_BYPASS_LOCAL_LAN, sp.getBoolean(KEY_BYPASS_LOCAL_LAN, DEFAULT_BYPASS_LOCAL_LAN))
+            addProperty(KEY_EXTRA_ROUTES, sp.getString(KEY_EXTRA_ROUTES, "") ?: "")
         }
         if (includeVersion) {
             json.addProperty(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
@@ -288,6 +302,68 @@ object EasyTierSettingsManager {
 
     fun isPauseOnScreenOff(context: Context): Boolean = getBoolPref(context, KEY_PAUSE_ON_SCREEN_OFF, DEFAULT_PAUSE_ON_SCREEN_OFF)
 
+    fun isBypassLocalLan(context: Context): Boolean =
+        getBoolPref(context, KEY_BYPASS_LOCAL_LAN, DEFAULT_BYPASS_LOCAL_LAN)
+
+    fun getExtraRoutes(context: Context): List<String> =
+        EasyTierRoutePlanner.parseList(getStringPref(context, KEY_EXTRA_ROUTES, ""))
+
+    // ------------------------------------------------------------------
+    // Last known mesh CIDRs (cross-process, not a user setting)
+    // ------------------------------------------------------------------
+
+    private fun lastRoutesFile(context: Context): File =
+        File(context.applicationContext.filesDir, LAST_ROUTES_FILE)
+
+    /**
+     * Persist the mesh CIDRs observed by the VPN process.  Values are
+     * validated again when read, so a corrupt file cannot inject public or
+     * overly broad routes.
+     */
+    fun setLastKnownMeshCidrs(context: Context, cidrs: Collection<String>): Boolean {
+        return try {
+            val safe = cidrs.filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
+                .distinct()
+                .sorted()
+            if (safe.isEmpty()) return false
+            val file = lastRoutesFile(context)
+            val tmp = File(file.parentFile, "$LAST_ROUTES_FILE.tmp")
+            val json = JsonObject().apply {
+                add("cidrs", com.google.gson.JsonArray().apply { safe.forEach { add(it) } })
+            }
+            tmp.writeText(json.toString())
+            tmp.renameTo(file)
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to write last known mesh CIDRs", e)
+            false
+        }
+    }
+
+    fun getLastKnownMeshCidrs(context: Context): List<String> {
+        return try {
+            val file = lastRoutesFile(context)
+            if (!file.exists()) return emptyList()
+            val json = JsonParser.parseString(file.readText()).takeIf { it.isJsonObject }?.asJsonObject
+                ?: return emptyList()
+            val array = json.getAsJsonArray("cidrs") ?: return emptyList()
+            array.mapNotNull { it.takeIf { item -> item.isJsonPrimitive }?.asString }
+                .filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
+                .distinct()
+                .sorted()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to read last known mesh CIDRs", e)
+            emptyList()
+        }
+    }
+
+    fun clearLastKnownMeshCidrs(context: Context) {
+        try {
+            lastRoutesFile(context).delete()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to clear last known mesh CIDRs", e)
+        }
+    }
+
     // ------------------------------------------------------------------
     // Setters — write to SharedPreferences AND snapshot file
     //
@@ -357,6 +433,20 @@ object EasyTierSettingsManager {
 
     fun setPauseOnScreenOff(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_PAUSE_ON_SCREEN_OFF, enabled).commit()
+        writeSnapshot(context)
+    }
+
+    fun setBypassLocalLan(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_BYPASS_LOCAL_LAN, enabled).commit()
+        writeSnapshot(context)
+    }
+
+    fun setExtraRoutes(context: Context, routes: List<String>) {
+        val normalized = routes.map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { EasyTierRoutePlanner.parseList(it).firstOrNull() }
+            .distinct()
+        prefs(context).edit().putString(KEY_EXTRA_ROUTES, normalized.joinToString(",")).commit()
         writeSnapshot(context)
     }
 
@@ -505,6 +595,13 @@ object EasyTierSettingsManager {
         }
         json.get(KEY_PAUSE_ON_SCREEN_OFF)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
             editor.putBoolean(KEY_PAUSE_ON_SCREEN_OFF, it); hasAny = true
+        }
+        json.get(KEY_BYPASS_LOCAL_LAN)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
+            editor.putBoolean(KEY_BYPASS_LOCAL_LAN, it); hasAny = true
+        }
+        json.get(KEY_EXTRA_ROUTES)?.takeIf { it.isJsonPrimitive }?.asString?.let { routes ->
+            val normalized = EasyTierRoutePlanner.parseList(routes)
+            editor.putString(KEY_EXTRA_ROUTES, normalized.joinToString(",")); hasAny = true
         }
 
         if (hasAny) {
