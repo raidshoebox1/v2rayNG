@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="easytier_pref_bypass_local_lan_title">স্থানীয় LAN সরাসরি রাখুন</string>
+    <string name="easytier_pref_bypass_local_lan_summary">এই ডিভাইসের Wi-Fi বা Ethernet সাবনেটে ট্রাফিক সরাসরি যায়, যাতে LocalSend, KDE Connect এবং mDNS কাজ করে। শুধু স্থানীয় LAN ট্রাফিক mesh দিয়ে পাঠাতে চাইলে বন্ধ করুন।</string>
+    <string name="easytier_pref_extra_routes_title">অতিরিক্ত EasyTier রুট</string>
+    <string name="easytier_full_tunnel_warning">EasyTier সম্পূর্ণ টানেল VPN-এর সাথে সক্রিয়। LAN আবিষ্কার (mDNS/broadcast) এখনও ব্যর্থ হতে পারে; VPN মোডে LAN এড়িয়ে যান চালু করুন।</string>
+    <string name="easytier_status_local_lan">স্থানীয় LAN (সরাসরি):</string>
+    <string name="easytier_status_easytier_routes">EasyTier রুট:</string>
+    <string name="easytier_route_conflict">রুট দ্বন্দ্ব: %1$s</string>
+    <string name="easytier_invalid_route">অবৈধ CIDR: %1$s</string>
+</resources>

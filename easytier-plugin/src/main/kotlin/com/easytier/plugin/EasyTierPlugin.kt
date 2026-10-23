@@ -65,13 +65,6 @@ class EasyTierPlugin(private val context: Context) {
         /** Outbound tag used in Xray-core routing. */
         const val OUTBOUND_TAG = "easytier"
 
-        /** CIDRs that should be routed through EasyTier. */
-        val DEFAULT_LAN_CIDRS = listOf(
-            "10.0.0.0/8",
-            "172.16.0.0/12",
-            "192.168.0.0/16"
-        )
-
         // ------------------------------------------------------------------
         // Tuning constants (centralized for easy adjustment)
         // ------------------------------------------------------------------
@@ -170,6 +163,16 @@ class EasyTierPlugin(private val context: Context) {
                 val tmp = File(file.parentFile, "$STATUS_SNAPSHOT_FILE.tmp")
                 tmp.writeText(json)
                 tmp.renameTo(file)
+
+                // Keep the resolved mesh CIDRs across VPN restarts.  The VPN
+                // interface is established before EasyTier starts, so the route
+                // plan cannot rely on the live JNI instance at that point.
+                val cidrs = parseMeshCidrs(json)
+                if (cidrs.isNotEmpty() && cidrs.toSet() != lastPersistedCidrs) {
+                    if (EasyTierSettingsManager.setLastKnownMeshCidrs(context, cidrs)) {
+                        lastPersistedCidrs = cidrs.toSet()
+                    }
+                }
             } catch (e: Throwable) {
                 log("W", "Failed to write status snapshot", e)
             }
@@ -223,6 +226,10 @@ class EasyTierPlugin(private val context: Context) {
 
         @Volatile
         private var lastError: String? = null
+
+        /** Last mesh CIDR set written to the cross-process last-known file. */
+        @Volatile
+        private var lastPersistedCidrs: Set<String> = emptySet()
 
         /**
          * JNI log callback that forwards Rust-side EasyTier logs into
@@ -422,6 +429,14 @@ class EasyTierPlugin(private val context: Context) {
             meshCidrsCacheTime = 0L
         }
 
+        /**
+         * Mesh CIDRs persisted by the previous session.  Used as a routing
+         * baseline before EasyTier has started in this session.
+         */
+        @JvmStatic
+        fun getLastKnownMeshCidrs(context: Context): List<String> =
+            EasyTierSettingsManager.getLastKnownMeshCidrs(context)
+
         // ------------------------------------------------------------------
         // Ipv4Inet / Ipv6Inet JSON parsing helpers
         // ------------------------------------------------------------------
@@ -485,8 +500,31 @@ class EasyTierPlugin(private val context: Context) {
             return try {
                 val json = EasyTierJNI.collectNetworkInfos(10)
                 if (json.isNullOrBlank()) return emptyList()
+                parseMeshCidrs(json)
+            } catch (e: Throwable) {
+                emptyList()
+            }
+        }
 
-                val cidrs = mutableSetOf<String>()
+        /**
+         * Parse the `collectNetworkInfos()` JSON into a sorted list of safe
+         * mesh CIDRs.
+         *
+         * Extracted from [collectMeshCidrs] so the same parser can also read
+         * the cross-process status snapshot and the persisted last-known
+         * route file.  It is public for JVM unit tests.
+         */
+        @JvmStatic
+        fun parseMeshCidrs(json: String): List<String> {
+            if (json.isBlank()) return emptyList()
+            val cidrs = mutableSetOf<String>()
+            fun addCidr(raw: String?) {
+                val normalized = raw?.let {
+                    runCatching { EasyTierCidr.parse(it)?.toString() }.getOrNull()
+                } ?: return
+                if (EasyTierRoutePlanner.isSafeMeshCidr(normalized)) cidrs.add(normalized)
+            }
+            try {
                 val parsed = JsonParser.parseString(json)
                 if (parsed.isJsonObject) {
                     val mapObj = parsed.asJsonObject.getAsJsonObject("map")
@@ -494,100 +532,39 @@ class EasyTierPlugin(private val context: Context) {
                     for ((_, info) in mapObj.entrySet()) {
                         val obj = info.asJsonObject
 
-                        // 1. Extract the local node's virtual IP subnet from my_node_info.virtual_ipv4.
-                        //    This gives us the on-link subnet (e.g. 10.144.144.0/24) that EasyTier
-                        //    uses for its virtual network.  Without this, the mesh CIDR list would
-                        //    be empty when no peers advertise proxy_cidrs, and traffic to the
-                        //    virtual LAN would not be routed through EasyTier.
+                        // 1. Local node's virtual IP subnet from my_node_info.virtual_ipv4.
+                        //    This gives us the on-link subnet (e.g. 10.144.144.0/24) that
+                        //    EasyTier uses for its virtual network.
                         val myNodeInfo = obj.getAsJsonObject("my_node_info")
                         if (myNodeInfo != null) {
-                            val cidr = parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4"))
-                            if (cidr != null && isSafeMeshCidr(cidr)) cidrs.add(cidr)
+                            addCidr(parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4")))
                         }
 
-                        // 2. Extract each remote peer's virtual IP from route entries (ipv4_addr).
-                        //    Each route entry has an ipv4_addr with the peer's virtual IP and the
-                        //    network's subnet mask (typically /24).  We add the full CIDR so that
-                        //    all peers in the same subnet are routable.
+                        // 2. Each remote peer's virtual IP from route entries.
                         val routes = obj.getAsJsonArray("routes")
                         if (routes != null) {
                             for (route in routes) {
                                 val routeObj = route.asJsonObject
 
-                                // Peer's virtual IPv4 address (Ipv4Inet: { address: { addr: uint32 }, network_length })
-                                val ipv4Cidr = parseIpv4InetCidr(routeObj.getAsJsonObject("ipv4_addr"))
-                                if (ipv4Cidr != null && isSafeMeshCidr(ipv4Cidr)) cidrs.add(ipv4Cidr)
-
-                                // IPv6 virtual address (Ipv6Inet: { address: { part1..part4: uint32 }, network_length })
-                                val ipv6Cidr = parseIpv6InetCidr(routeObj.getAsJsonObject("ipv6_addr"))
-                                if (ipv6Cidr != null && isSafeMeshCidr(ipv6Cidr)) cidrs.add(ipv6Cidr)
+                                addCidr(parseIpv4InetCidr(routeObj.getAsJsonObject("ipv4_addr")))
+                                addCidr(parseIpv6InetCidr(routeObj.getAsJsonObject("ipv6_addr")))
 
                                 // proxy_cidrs: additional subnet ranges the peer proxies
                                 // (e.g. a LAN behind the peer, or a VPN portal client network).
                                 val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
                                 if (proxyCidrs != null) {
                                     for (cidr in proxyCidrs) {
-                                        val c = cidr.asString
-                                        if (isSafeMeshCidr(c)) cidrs.add(c)
+                                        addCidr(cidr.asString)
                                     }
                                 }
                             }
                         }
                     }
                 }
-                cidrs.toList()
             } catch (e: Throwable) {
-                emptyList()
+                return emptyList()
             }
-        }
-
-        /**
-         * Validate a CIDR advertised by a mesh peer before injecting it into
-         * routing rules.  Rejects overly-broad prefixes (<= 7), public IP
-         * ranges, and anything that doesn't parse as a valid CIDR.
-         *
-         * Allowed ranges:
-         * - IPv4 private: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
-         * - IPv4 link-local: 169.254.0.0/16
-         * - IPv4 CGNAT: 100.64.0.0/10
-         * - IPv6 ULA: fc00::/7
-         * - IPv6 link-local: fe80::/10
-         */
-        private fun isSafeMeshCidr(cidr: String): Boolean {
-            val parts = cidr.split("/")
-            if (parts.size != 2) return false
-            val ip = parts[0]
-            val prefix = parts[1].toIntOrNull() ?: return false
-
-            // Reject overly-broad prefixes
-            if (prefix < 0) return false
-            if (ip.contains(":")) {
-                // IPv6
-                if (prefix > 128) return false
-                if (prefix <= 7) return false  // reject ::/0 through ::/7
-                // Only allow ULA (fc00::/7) and link-local (fe80::/10)
-                val ipLower = ip.lowercase()
-                return ipLower.startsWith("fc") || ipLower.startsWith("fd") ||
-                       ipLower.startsWith("fe8") || ipLower.startsWith("fe9") ||
-                       ipLower.startsWith("fea") || ipLower.startsWith("feb")
-            } else {
-                // IPv4
-                if (prefix > 32) return false
-                if (prefix <= 7) return false  // reject 0.0.0.0/0 through /7
-                val octets = ip.split(".")
-                if (octets.size != 4) return false
-                val o = octets.map { it.toIntOrNull() ?: return false }
-                if (o.any { it !in 0..255 }) return false
-                // Only allow private / special-use ranges
-                return when {
-                    o[0] == 10 -> true                              // 10.0.0.0/8
-                    o[0] == 172 && o[1] in 16..31 -> true            // 172.16.0.0/12
-                    o[0] == 192 && o[1] == 168 -> true               // 192.168.0.0/16
-                    o[0] == 169 && o[1] == 254 -> true               // 169.254.0.0/16 (link-local)
-                    o[0] == 100 && o[1] in 64..127 -> true           // 100.64.0.0/10 (CGNAT)
-                    else -> false
-                }
-            }
+            return cidrs.sorted()
         }
 
         /**
@@ -969,6 +946,12 @@ class EasyTierPlugin(private val context: Context) {
             }
 
             val toml = config.toToml()
+            if (config.virtualIp.isNullOrBlank()) {
+                // EasyTier's TOML `dhcp` flag is not set by this plugin, so a
+                // node without an explicit virtual IP has no mesh address and
+                // the SOCKS5 portal can only fall back to direct connections.
+                log("W", "EasyTier: no virtual IP configured; mesh routing will be unavailable. Set a virtual IP (e.g. 10.144.144.1).")
+            }
             log("I", "Starting EasyTier instance: ${config.instanceName}")
             // Do NOT log the full TOML — it contains network_secret in cleartext.
             // Only log non-sensitive fields at debug level.

@@ -93,15 +93,25 @@ Telegram Channel / Telegram 频道：
 
 ## EasyTier Mesh VPN Plugin
 
-EasyTier runs in **no-tun + SOCKS5** mode (loopback only) inside the v2rayNG process; it does **not** compete for the Android VpnService slot. Xray-core routes LAN/mesh CIDRs to the EasyTier SOCKS5 outbound via an injected routing rule. No-TUN mode is mandatory because EasyTier's own TUN would conflict with v2rayNG's VpnService.
+EasyTier runs in **no-tun + SOCKS5** mode (loopback only) inside the v2rayNG process; it does **not** compete for the Android VpnService slot. Xray-core routes only the actual EasyTier mesh/remote CIDRs to the EasyTier SOCKS5 outbound via an injected routing rule. No-TUN mode is mandatory because EasyTier's own TUN would conflict with v2rayNG's VpnService.
 
 ```
 App traffic → VpnService → Xray-core routing
-  ├─ public traffic  → proxy outbound (VMess/VLESS/Trojan/SS…)
-  └─ LAN/mesh CIDRs  → easytier outbound (SOCKS5 127.0.0.1:10852) → EasyTier mesh
+  ├─ public traffic       → proxy outbound (VMess/VLESS/Trojan/SS…)
+  ├─ local LAN (Wi-Fi/…)  → direct (LocalSend, KDE Connect, mDNS)
+  └─ EasyTier mesh/remote → easytier outbound (SOCKS5 127.0.0.1:10852) → EasyTier mesh
 ```
 
-Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); topology changes may take up to 5 s to propagate into routing rules.
+The device's own LAN is detected from `ConnectivityManager` and is always kept
+direct by default. The old behaviour of routing `10/8`, `172.16/12` and
+`192.168/16` through EasyTier is deliberately gone: it captured real LAN
+devices and broke local service discovery. Peers that proxy a remote LAN can
+still be reached by adding that subnet under **Extra EasyTier Routes**, or
+automatically through discovered `proxy_cidrs`.
+
+Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); they
+are also persisted to `easytier_last_routes.json` so the VPN interface can be
+built with a usable routing baseline before EasyTier starts.
 
 ### Security
 

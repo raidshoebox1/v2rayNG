@@ -17,4 +17,5 @@
     <exclude domain="sharedpref" path="easytier_secret.xml" />
     <exclude domain="file" path="easytier_config.json" />
     <exclude domain="file" path="easytier_status.json" />
+    <exclude domain="file" path="easytier_last_routes.json" />
 </full-backup-content>
