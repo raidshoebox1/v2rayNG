@@ -1397,33 +1397,10 @@ object CoreConfigManager {
 
         // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority.
         // The direct LAN rule must come before the EasyTier rule.
-        val insertIndex = v2rayConfig.routing.rules.indexOfLast { it.outboundTag == "dns-out" } + 1
-        var nextIndex = insertIndex
-        if (plan.localLanCidrs.isNotEmpty() &&
-            v2rayConfig.routing.rules.none { it.outboundTag == AppConfig.TAG_DIRECT && it.ip == plan.localLanCidrs }
-        ) {
-            v2rayConfig.routing.rules.add(
-                nextIndex,
-                V2rayConfig.RoutingBean.RulesBean(
-                    type = "field",
-                    ip = ArrayList(plan.localLanCidrs),
-                    outboundTag = AppConfig.TAG_DIRECT
-                )
-            )
-            nextIndex++
-        }
-        if (plan.easyTierCidrs.isNotEmpty() &&
-            v2rayConfig.routing.rules.none { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }
-        ) {
-            v2rayConfig.routing.rules.add(
-                nextIndex,
-                V2rayConfig.RoutingBean.RulesBean(
-                    type = "field",
-                    ip = ArrayList(plan.easyTierCidrs),
-                    outboundTag = EasyTierPlugin.OUTBOUND_TAG
-                )
-            )
-            LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule at index $nextIndex for CIDRs: ${plan.easyTierCidrs}")
+        val additions = EasyTierRoutingRules.buildMissing(v2rayConfig.routing.rules, plan)
+        EasyTierRoutingRules.insertAfterDnsOut(v2rayConfig.routing.rules, additions)
+        additions.firstOrNull { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }?.let {
+            LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule for CIDRs: ${it.ip}")
         }
     }
 
