@@ -38,7 +38,9 @@ class EasyTierPlugin(private val context: Context) {
         val isClosed: Boolean,
         val tunnelType: String?,
         val rxBytes: Long,
-        val txBytes: Long
+        val txBytes: Long,
+        /** LAN subnets this peer advertises through proxy_networks. */
+        val proxyCidrs: List<String>
     )
 
     /**
@@ -858,6 +860,13 @@ class EasyTierPlugin(private val context: Context) {
                         }
                     }
 
+                    val proxyCidrs = route?.getAsJsonArray("proxy_cidrs")
+                        ?.mapNotNull { element ->
+                            element.takeIf { it.isJsonPrimitive }?.asString
+                        }
+                        ?.filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
+                        ?: emptyList()
+
                     peers.add(MeshPeerInfo(
                         hostname = hostname,
                         virtualIp = virtualIp,
@@ -866,7 +875,8 @@ class EasyTierPlugin(private val context: Context) {
                         isClosed = isClosed,
                         tunnelType = tunnelType,
                         rxBytes = rxBytes,
-                        txBytes = txBytes
+                        txBytes = txBytes,
+                        proxyCidrs = proxyCidrs
                     ))
                 }
             }

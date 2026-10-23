@@ -12,4 +12,5 @@
     <string name="easytier_warning_extra_route_unadvertised">مسیر اضافی %1$s توسط هیچ peer EasyTier اعلام نشده است؛ proxy_networks روی روترها را بررسی کنید.</string>
     <string name="easytier_warning_broad_mesh_cidr">یک peer شبکه بزرگ %1$s را اعلام می‌کند؛ برای جلوگیری از ابهام مسیریابی mesh از proxy_networks /24 برای هر سایت استفاده کنید.</string>
     <string name="easytier_warning_per_app_proxy">پروکسی هر برنامه فعال است؛ برنامه‌هایی که VPN را دور می‌زنند نمی‌توانند از مسیرهای EasyTier استفاده کنند. فهرست عبور KDE Connect و LocalSend را بررسی کنید.</string>
+    <string name="easytier_peer_proxy_cidrs">پروکسی: %1$s</string>
 </resources>

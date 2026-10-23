@@ -100,4 +100,5 @@
     <string name="easytier_warning_extra_route_unadvertised">Extra route %1$s is not advertised by any EasyTier peer; check proxy_networks on the routers.</string>
     <string name="easytier_warning_broad_mesh_cidr">A peer advertises the broad subnet %1$s; prefer per-site /24 proxy_networks to avoid ambiguous mesh routing.</string>
     <string name="easytier_warning_per_app_proxy">Per-app proxy is enabled; apps that bypass the VPN cannot use EasyTier routes. Check the bypass list for KDE Connect and LocalSend.</string>
+    <string name="easytier_peer_proxy_cidrs">proxy: %1$s</string>
 </resources>

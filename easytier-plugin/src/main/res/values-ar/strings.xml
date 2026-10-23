@@ -12,4 +12,5 @@
     <string name="easytier_warning_extra_route_unadvertised">المسار الإضافي %1$s غير معلن من أي peer في EasyTier؛ تحقق من proxy_networks على الراوترات.</string>
     <string name="easytier_warning_broad_mesh_cidr">يعلن peer عن شبكة واسعة %1$s؛ يفضل استخدام proxy_networks /24 لكل موقع لتجنب غموض توجيه mesh.</string>
     <string name="easytier_warning_per_app_proxy">تم تمكين وكيل التطبيقات؛ التطبيقات التي تتجاوز VPN لا يمكنها استخدام مسارات EasyTier. تحقق من قائمة التجاوز لـ KDE Connect وLocalSend.</string>
+    <string name="easytier_peer_proxy_cidrs">الوكيل: %1$s</string>
 </resources>

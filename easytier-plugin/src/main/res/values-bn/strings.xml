@@ -12,4 +12,5 @@
     <string name="easytier_warning_extra_route_unadvertised">অতিরিক্ত রুট %1$s কোনো EasyTier peer ঘোষণা করেনি; রাউটারগুলোর proxy_networks পরীক্ষা করুন।</string>
     <string name="easytier_warning_broad_mesh_cidr">একটি peer বড় নেটওয়ার্ক %1$s ঘোষণা করছে; mesh রাউটিং বিভ্রান্তি এড়াতে প্রতি সাইটে /24 proxy_networks ব্যবহার করুন।</string>
     <string name="easytier_warning_per_app_proxy">অ্যাপভিত্তিক প্রক্সি চালু আছে; VPN এড়িয়ে যাওয়া অ্যাপ EasyTier রুট ব্যবহার করতে পারবে না। KDE Connect এবং LocalSend-এর এড়ানোর তালিকা পরীক্ষা করুন।</string>
+    <string name="easytier_peer_proxy_cidrs">প্রক্সি: %1$s</string>
 </resources>

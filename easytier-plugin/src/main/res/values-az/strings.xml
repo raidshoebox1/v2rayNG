@@ -12,4 +12,5 @@
     <string name="easytier_warning_extra_route_unadvertised">Əlavə %1$s marşrutu heç bir EasyTier peer tərəfindən elan edilmir; routerlərdə proxy_networks ayarını yoxlayın.</string>
     <string name="easytier_warning_broad_mesh_cidr">Bir peer geniş %1$s şəbəkəsini elan edir; mesh marşrutlaşdırmasında qeyri-müəyyənliyin qarşısını almaq üçün hər site üçün /24 proxy_networks istifadə edin.</string>
     <string name="easytier_warning_per_app_proxy">Tətbiq üzrə proxy aktivdir; VPN-i yan keçən tətbiqlər EasyTier marşrutlarından istifadə edə bilməz. KDE Connect və LocalSend üçün yan keçmə siyahısını yoxlayın.</string>
+    <string name="easytier_peer_proxy_cidrs">proxy: %1$s</string>
 </resources>
