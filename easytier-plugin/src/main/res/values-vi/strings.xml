@@ -8,4 +8,8 @@
     <string name="easytier_status_easytier_routes">Tuyến EasyTier:</string>
     <string name="easytier_route_conflict">Xung đột tuyến: %1$s</string>
     <string name="easytier_invalid_route">CIDR không hợp lệ: %1$s</string>
+    <string name="easytier_status_extra_routes">Tuyến bổ sung:</string>
+    <string name="easytier_warning_extra_route_unadvertised">Tuyến bổ sung %1$s không được peer EasyTier nào quảng bá; hãy kiểm tra proxy_networks trên router.</string>
+    <string name="easytier_warning_broad_mesh_cidr">Một peer quảng bá mạng lớn %1$s; nên dùng proxy_networks /24 cho từng site để tránh định tuyến mesh mơ hồ.</string>
+    <string name="easytier_warning_per_app_proxy">Đang bật proxy theo ứng dụng; ứng dụng bỏ qua VPN không thể dùng tuyến EasyTier. Hãy kiểm tra danh sách bỏ qua của KDE Connect và LocalSend.</string>
 </resources>

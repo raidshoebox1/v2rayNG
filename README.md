@@ -113,6 +113,23 @@ Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); they
 are also persisted to `easytier_last_routes.json` so the VPN interface can be
 built with a usable routing baseline before EasyTier starts.
 
+### Remote LANs and KDE Connect
+
+- Add each remote site subnet (for example `192.168.31.0/24`,
+  `192.168.32.0/24`, `192.168.33.0/24`) to **Extra EasyTier Routes**.
+- Configure every EasyTier router to advertise only its own `/24` with
+  `proxy_networks`; advertising a broad `192.168.0.0/16` from several routers
+  makes mesh routing ambiguous.
+- EasyTier's SOCKS5 portal currently carries TCP only. UDP to remote subnets
+  (KDE Connect discovery, LocalSend announcements) is not routed through the
+  mesh; local LAN UDP stays direct.
+- KDE Connect discovery uses UDP broadcast and does not cross subnets. Pair or
+  add the device while on the same LAN, then let the stored TCP endpoint use
+  the EasyTier route.
+- If the remote device must see a LAN-local source address, enable
+  masquerading on the site router for the EasyTier virtual subnet, for example
+  `iptables -t nat -A POSTROUTING -s 10.144.144.0/24 -o br-lan -j MASQUERADE`.
+
 ### Security
 
 - **SOCKS5 binds to `127.0.0.1` only** — the EasyTier SOCKS5 listener is not exposed to other devices on the LAN.

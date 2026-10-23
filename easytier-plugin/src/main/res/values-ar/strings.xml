@@ -8,4 +8,8 @@
     <string name="easytier_status_easytier_routes">مسارات EasyTier:</string>
     <string name="easytier_route_conflict">تعارض المسار: %1$s</string>
     <string name="easytier_invalid_route">CIDR غير صالح: %1$s</string>
+    <string name="easytier_status_extra_routes">المسارات الإضافية:</string>
+    <string name="easytier_warning_extra_route_unadvertised">المسار الإضافي %1$s غير معلن من أي peer في EasyTier؛ تحقق من proxy_networks على الراوترات.</string>
+    <string name="easytier_warning_broad_mesh_cidr">يعلن peer عن شبكة واسعة %1$s؛ يفضل استخدام proxy_networks /24 لكل موقع لتجنب غموض توجيه mesh.</string>
+    <string name="easytier_warning_per_app_proxy">تم تمكين وكيل التطبيقات؛ التطبيقات التي تتجاوز VPN لا يمكنها استخدام مسارات EasyTier. تحقق من قائمة التجاوز لـ KDE Connect وLocalSend.</string>
 </resources>
