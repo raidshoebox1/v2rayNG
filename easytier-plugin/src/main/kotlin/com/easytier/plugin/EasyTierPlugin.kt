@@ -758,7 +758,7 @@ class EasyTierPlugin(private val context: Context) {
          * If no running instance is found, returns a MeshStatus with
          * running=false (and errorMsg if present).
          */
-        private fun parsePeerStatusJson(json: String): MeshStatus? {
+        internal fun parsePeerStatusJson(json: String): MeshStatus? {
             val parsed = JsonParser.parseString(json)
             if (!parsed.isJsonObject) return null
             val mapObj = parsed.asJsonObject.getAsJsonObject("map")
@@ -881,7 +881,7 @@ class EasyTierPlugin(private val context: Context) {
                 }
             }
 
-            val meshCidrs = collectMeshCidrs()
+            val meshCidrs = parseMeshCidrs(json)
 
             return MeshStatus(
                 running = running,
