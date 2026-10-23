@@ -41,10 +41,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.easytier.plugin.EasyTierCidr
 import com.easytier.plugin.EasyTierPlugin
 import com.easytier.plugin.EasyTierRoutePlanner
 import com.easytier.plugin.EasyTierSettingsManager
 import com.easytier.plugin.R
+import com.v2ray.ang.AppConfig
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.ui.compose.AppTopBar
 import com.v2ray.ang.ui.compose.PreferenceGroupHeader
@@ -293,15 +296,21 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 title = stringResource(R.string.easytier_pref_extra_routes_title),
                 value = extraRoutes,
                 onValueChanged = { newValue ->
-                    val invalid = newValue.split('\n', ',', ' ', '\t', ';')
+                    val tokens = newValue.split('\n', ',', ' ', '\t', ';')
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
-                        .filter { !EasyTierRoutePlanner.isSafeMeshCidr(it) }
-                    if (invalid.isEmpty()) {
-                        extraRoutes = newValue
-                        EasyTierSettingsManager.setExtraRoutes(context, EasyTierRoutePlanner.parseList(newValue))
-                    } else {
-                        context.toastError(invalidRouteFormat.format(invalid.first()))
+                    val valid = tokens.filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
+                    val invalid = tokens.filter { !EasyTierRoutePlanner.isSafeMeshCidr(it) }
+                    extraRoutes = newValue
+                    if (tokens.isEmpty()) {
+                        // Explicitly clearing the field removes all extra routes.
+                        EasyTierSettingsManager.setExtraRoutes(context, emptyList())
+                    } else if (valid.isNotEmpty()) {
+                        // Keep the valid entries even when one token has a typo.
+                        EasyTierSettingsManager.setExtraRoutes(context, valid)
+                    }
+                    if (invalid.isNotEmpty()) {
+                        context.toastError(invalidRouteFormat.format(invalid.joinToString(", ")))
                     }
                 }
             )
@@ -609,6 +618,7 @@ private fun formatStatus(context: Context, status: EasyTierPlugin.MeshStatus?): 
     }
 
     val localLan = NetworkRouteUtil.collectLocalLanCidrs(context)
+    val extraRoutes = EasyTierSettingsManager.getExtraRoutes(context)
     if (localLan.isNotEmpty()) {
         sb.append(context.getString(R.string.easytier_status_local_lan))
         sb.append("\n")
@@ -617,13 +627,58 @@ private fun formatStatus(context: Context, status: EasyTierPlugin.MeshStatus?): 
         }
     }
 
+    if (extraRoutes.isNotEmpty()) {
+        sb.append(context.getString(R.string.easytier_status_extra_routes))
+        sb.append("\n")
+        for (cidr in extraRoutes) {
+            sb.append("  ").append(cidr).append("\n")
+        }
+
+        // An extra route that no peer advertises cannot be resolved by the
+        // EasyTier mesh; traffic falls back to the local kernel route.  This is
+        // the usual symptom when a router was configured without
+        // proxy_networks, or when a subnet was entered with a typo.
+        for (route in extraRoutes) {
+            val routeCidr = EasyTierCidr.parse(route) ?: continue
+            val isLocal = localLan.any { local ->
+                EasyTierCidr.parse(local)?.contains(routeCidr) == true
+            }
+            val isAdvertised = status.meshCidrs.any { mesh ->
+                EasyTierCidr.parse(mesh)?.contains(routeCidr) == true
+            }
+            if (!isLocal && !isAdvertised) {
+                sb.append(
+                    context.getString(R.string.easytier_warning_extra_route_unadvertised, route)
+                ).append("\n")
+            }
+        }
+    }
+
+    // Broad peer advertisements (for example 192.168.0.0/16 from every router)
+    // make longest-prefix selection ambiguous and are a common cause of a link
+    // that connects and then drops.  Ask for per-site /24 advertisements.
+    val broadMesh = linkedSetOf<String>()
+    for (mesh in status.meshCidrs) {
+        val cidr = EasyTierCidr.parse(mesh) ?: continue
+        if (!cidr.isIpv6 && cidr.prefixLength < 24) broadMesh.add(mesh)
+    }
+    for (mesh in broadMesh) {
+        sb.append(context.getString(R.string.easytier_warning_broad_mesh_cidr, mesh)).append("\n")
+    }
+
+    if (MmkvManager.decodeSettingsBool(AppConfig.PREF_PER_APP_PROXY) &&
+        !MmkvManager.decodeSettingsStringSet(AppConfig.PREF_PER_APP_PROXY_SET).isNullOrEmpty()
+    ) {
+        sb.append(context.getString(R.string.easytier_warning_per_app_proxy)).append("\n")
+    }
+
     try {
         val plan = EasyTierRoutePlanner.plan(
             localLanCidrs = localLan,
             vpnClientCidr = SettingsManager.getCurrentVpnInterfaceAddressConfig().ipv4Client + "/30",
             meshCidrs = status.meshCidrs,
             virtualIp = status.virtualIp,
-            extraCidrs = EasyTierSettingsManager.getExtraRoutes(context),
+            extraCidrs = extraRoutes,
             bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(context)
         )
         if (plan.easyTierCidrs.isNotEmpty()) {

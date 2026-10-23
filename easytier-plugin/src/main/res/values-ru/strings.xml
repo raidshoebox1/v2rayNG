@@ -8,4 +8,8 @@
     <string name="easytier_status_easytier_routes">Маршруты EasyTier:</string>
     <string name="easytier_route_conflict">Конфликт маршрутов: %1$s</string>
     <string name="easytier_invalid_route">Недопустимый CIDR: %1$s</string>
+    <string name="easytier_status_extra_routes">Дополнительные маршруты:</string>
+    <string name="easytier_warning_extra_route_unadvertised">Дополнительный маршрут %1$s не объявлен ни одним пиром EasyTier; проверьте proxy_networks на роутерах.</string>
+    <string name="easytier_warning_broad_mesh_cidr">Пир объявляет широкую сеть %1$s; лучше использовать proxy_networks /24 для каждого сайта, чтобы избежать неоднозначной маршрутизации mesh.</string>
+    <string name="easytier_warning_per_app_proxy">Включён прокси для отдельных приложений; приложения в обходе VPN не используют маршруты EasyTier. Проверьте список обхода для KDE Connect и LocalSend.</string>
 </resources>

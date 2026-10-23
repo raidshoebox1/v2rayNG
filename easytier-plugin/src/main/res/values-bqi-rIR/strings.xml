@@ -8,4 +8,8 @@
     <string name="easytier_status_easytier_routes">مسیرهای EasyTier:</string>
     <string name="easytier_route_conflict">تداخل مسیر: %1$s</string>
     <string name="easytier_invalid_route">CIDR نامعتبر: %1$s</string>
+    <string name="easytier_status_extra_routes">مسیرهای اضافی:</string>
+    <string name="easytier_warning_extra_route_unadvertised">مسیر اضافی %1$s توسط هیچ peer EasyTier اعلام نشده؛ proxy_networks روی روترها را بررسی کن.</string>
+    <string name="easytier_warning_broad_mesh_cidr">یک peer شبکه بزرگ %1$s را اعلام می‌کند؛ برای جلوگیری از ابهام مسیریابی mesh از proxy_networks /24 برای هر سایت استفاده کن.</string>
+    <string name="easytier_warning_per_app_proxy">پروکسی هر برنامه فعاله؛ برنامه‌هایی که VPN را دور می‌زنن نمی‌تونن از مسیرهای EasyTier استفاده کنن. لیست عبور KDE Connect و LocalSend را بررسی کن.</string>
 </resources>

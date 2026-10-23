@@ -98,4 +98,8 @@
     <string name="easytier_status_easytier_routes">EasyTier 路由：</string>
     <string name="easytier_route_conflict">路由冲突：%1$s</string>
     <string name="easytier_invalid_route">无效的 CIDR：%1$s</string>
+    <string name="easytier_status_extra_routes">额外路由：</string>
+    <string name="easytier_warning_extra_route_unadvertised">额外路由 %1$s 未被任何 EasyTier 对端声明，请检查路由器的 proxy_networks 配置。</string>
+    <string name="easytier_warning_broad_mesh_cidr">有对端声明了大网段 %1$s；建议每个站点只声明自己的 /24 子网，避免 mesh 路由歧义。</string>
+    <string name="easytier_warning_per_app_proxy">已启用分应用代理；绕过 VPN 的应用无法使用 EasyTier 路由。请检查 KDE Connect 和 LocalSend 是否在绕行列表中。</string>
 </resources>
