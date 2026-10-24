@@ -7,8 +7,6 @@ import com.easytier.jni.EasyTierJNI
 import com.easytier.jni.LogCallback
 import com.easytier.plugin.BuildConfig
 import java.io.File
-import java.net.InetSocketAddress
-import java.net.Socket
 
 /**
  * EasyTier Plugin for v2rayNG
@@ -67,6 +65,33 @@ class EasyTierPlugin(private val context: Context) {
         /** Outbound tag used in Xray-core routing. */
         const val OUTBOUND_TAG = "easytier"
 
+        /**
+         * Serializes every call into the native EasyTier library.
+         *
+         * The status-writer thread polls `collectNetworkInfos` while the service
+         * main thread may call `runNetworkInstance` or `stopAllInstances` on the
+         * same native library.  The JNI layer is not documented as re-entrant,
+         * so all entry points share this lock.  (An earlier revision had this
+         * guard; it was lost in a merge and is restored here.)
+         */
+        private val nativeLock = Any()
+
+        private inline fun <T> withNative(block: () -> T): T = synchronized(nativeLock) { block() }
+
+        /** True once a verified EasyTier listener is running in this process. */
+        @Volatile
+        private var sessionActive = false
+
+        /**
+         * Whether this process currently owns a *verified* EasyTier listener.
+         *
+         * Routing rules must only be injected while this is true: otherwise
+         * mesh-bound traffic could be handed to whatever process happens to
+         * own the configured loopback port.
+         */
+        @JvmStatic
+        fun isSessionActive(): Boolean = sessionActive
+
         // ------------------------------------------------------------------
         // Tuning constants (centralized for easy adjustment)
         // ------------------------------------------------------------------
@@ -85,6 +110,9 @@ class EasyTierPlugin(private val context: Context) {
 
         /** SOCKS5 listener readiness probe: connect timeout per attempt (ms). */
         const val SOCKS5_CONNECT_TIMEOUT_MS = 200
+
+        /** SOCKS5 listener readiness probe: greeting reply timeout per attempt (ms). */
+        const val SOCKS5_READ_TIMEOUT_MS = 300
 
         /** SOCKS5 listener readiness probe: delay between attempts (ms). */
         const val SOCKS5_RETRY_DELAY_MS = 400L
@@ -126,7 +154,7 @@ class EasyTierPlugin(private val context: Context) {
         fun isJniAvailable(): Boolean {
             jniAvailabilityCached?.let { return it }
             val available = try {
-                EasyTierJNI.getLastError()
+                withNative { EasyTierJNI.getLastError() }
                 true
             } catch (e: UnsatisfiedLinkError) {
                 false
@@ -159,7 +187,7 @@ class EasyTierPlugin(private val context: Context) {
         fun writeStatusSnapshot(context: Context) {
             if (!isJniAvailable()) return
             try {
-                val json = EasyTierJNI.collectNetworkInfos(50)
+                val json = withNative { EasyTierJNI.collectNetworkInfos(50) }
                 if (json.isNullOrBlank()) return
                 val file = statusSnapshotFile(context)
                 val tmp = File(file.parentFile, "$STATUS_SNAPSHOT_FILE.tmp")
@@ -269,7 +297,7 @@ class EasyTierPlugin(private val context: Context) {
         fun ensureLogCallbackRegistered() {
             if (logCallbackRegistered) return
             try {
-                EasyTierJNI.setLogCallback(jniLogCallback)
+                withNative { EasyTierJNI.setLogCallback(jniLogCallback) }
                 logCallbackRegistered = true
                 log("I", "EasyTier: JNI log callback registered")
             } catch (e: Throwable) {
@@ -285,7 +313,7 @@ class EasyTierPlugin(private val context: Context) {
         fun disableLogCallback() {
             if (!logCallbackRegistered) return
             try {
-                EasyTierJNI.setLogCallback(null)
+                withNative { EasyTierJNI.setLogCallback(null) }
                 logCallbackRegistered = false
                 log("I", "EasyTier: JNI log callback disabled")
             } catch (e: Throwable) {
@@ -301,7 +329,7 @@ class EasyTierPlugin(private val context: Context) {
         @JvmStatic
         fun setLogLevel(level: String) {
             try {
-                EasyTierJNI.setLogLevel(level)
+                withNative { EasyTierJNI.setLogLevel(level) }
             } catch (e: Throwable) {
                 log("W", "EasyTier: failed to set log level to $level", e)
             }
@@ -500,7 +528,7 @@ class EasyTierPlugin(private val context: Context) {
 
         private fun collectMeshCidrs(): List<String> {
             return try {
-                val json = EasyTierJNI.collectNetworkInfos(10)
+                val json = withNative { EasyTierJNI.collectNetworkInfos(10) }
                 if (json.isNullOrBlank()) return emptyList()
                 parseMeshCidrs(json)
             } catch (e: Throwable) {
@@ -526,45 +554,54 @@ class EasyTierPlugin(private val context: Context) {
                 } ?: return
                 if (EasyTierRoutePlanner.isSafeMeshCidr(normalized)) cidrs.add(normalized)
             }
-            try {
-                val parsed = JsonParser.parseString(json)
-                if (parsed.isJsonObject) {
-                    val mapObj = parsed.asJsonObject.getAsJsonObject("map")
-                        ?: parsed.asJsonObject
-                    for ((_, info) in mapObj.entrySet()) {
-                        val obj = info.asJsonObject
 
-                        // 1. Local node's virtual IP subnet from my_node_info.virtual_ipv4.
-                        //    This gives us the on-link subnet (e.g. 10.144.144.0/24) that
-                        //    EasyTier uses for its virtual network.
-                        val myNodeInfo = obj.getAsJsonObject("my_node_info")
-                        if (myNodeInfo != null) {
-                            addCidr(parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4")))
-                        }
-
-                        // 2. Each remote peer's virtual IP from route entries.
-                        val routes = obj.getAsJsonArray("routes")
-                        if (routes != null) {
-                            for (route in routes) {
-                                val routeObj = route.asJsonObject
-
-                                addCidr(parseIpv4InetCidr(routeObj.getAsJsonObject("ipv4_addr")))
-                                addCidr(parseIpv6InetCidr(routeObj.getAsJsonObject("ipv6_addr")))
-
-                                // proxy_cidrs: additional subnet ranges the peer proxies
-                                // (e.g. a LAN behind the peer, or a VPN portal client network).
-                                val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
-                                if (proxyCidrs != null) {
-                                    for (cidr in proxyCidrs) {
-                                        addCidr(cidr.asString)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            val root = try {
+                JsonParser.parseString(json)
             } catch (e: Throwable) {
                 return emptyList()
+            }
+            if (!root.isJsonObject) return emptyList()
+            val mapObj = root.asJsonObject.getAsJsonObject("map")
+                ?: root.asJsonObject
+
+            for ((_, info) in mapObj.entrySet()) {
+                // A single malformed entry must not hide the routes of all the
+                // other instances; skip it and keep parsing.
+                try {
+                    val obj = info.asJsonObject
+
+                    // 1. Local node's virtual IP subnet from my_node_info.virtual_ipv4.
+                    //    This gives us the on-link subnet (e.g. 10.144.144.0/24) that
+                    //    EasyTier uses for its virtual network.
+                    val myNodeInfo = obj.getAsJsonObject("my_node_info")
+                    if (myNodeInfo != null) {
+                        addCidr(parseIpv4InetCidr(myNodeInfo.getAsJsonObject("virtual_ipv4")))
+                    }
+
+                    // 2. Each remote peer's virtual IP from route entries.
+                    val routes = obj.getAsJsonArray("routes") ?: continue
+                    for (route in routes) {
+                        try {
+                            val routeObj = route.asJsonObject
+
+                            addCidr(parseIpv4InetCidr(routeObj.getAsJsonObject("ipv4_addr")))
+                            addCidr(parseIpv6InetCidr(routeObj.getAsJsonObject("ipv6_addr")))
+
+                            // proxy_cidrs: additional subnet ranges the peer proxies
+                            // (e.g. a LAN behind the peer, or a VPN portal client network).
+                            val proxyCidrs = routeObj.getAsJsonArray("proxy_cidrs")
+                            if (proxyCidrs != null) {
+                                for (cidr in proxyCidrs) {
+                                    addCidr(cidr.asString)
+                                }
+                            }
+                        } catch (e: Throwable) {
+                            // Skip this route entry, keep the rest.
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // Skip this instance entry, keep the rest.
+                }
             }
             return cidrs.sorted()
         }
@@ -583,7 +620,7 @@ class EasyTierPlugin(private val context: Context) {
             // Try JNI first (same-process instance, e.g. test instance)
             if (isJniAvailable()) {
                 try {
-                    val json = EasyTierJNI.collectNetworkInfos(50)
+                    val json = withNative { EasyTierJNI.collectNetworkInfos(50) }
                     if (!json.isNullOrBlank() && hasRunningInstance(json)) {
                         return json
                     }
@@ -667,7 +704,7 @@ class EasyTierPlugin(private val context: Context) {
             // Try JNI first (same-process instance)
             if (isJniAvailable()) {
                 try {
-                    val json = EasyTierJNI.collectNetworkInfos(10)
+                    val json = withNative { EasyTierJNI.collectNetworkInfos(10) }
                     if (!json.isNullOrBlank() && hasRunningInstance(json)) {
                         return true
                     }
@@ -730,7 +767,7 @@ class EasyTierPlugin(private val context: Context) {
             // Try JNI first (same-process instance, e.g. test instance)
             if (isJniAvailable()) {
                 try {
-                    val json = EasyTierJNI.collectNetworkInfos(50)
+                    val json = withNative { EasyTierJNI.collectNetworkInfos(50) }
                     if (!json.isNullOrBlank()) {
                         val status = parsePeerStatusJson(json)
                         if (status != null && status.running) return status
@@ -932,7 +969,7 @@ class EasyTierPlugin(private val context: Context) {
                 // Diagnose stale instances before stopping them — this helps
                 // understand crash-recovery scenarios where a previous native
                 // instance survived the Java process restart.
-                val instances = EasyTierJNI.listInstances(10)
+                val instances = withNative { EasyTierJNI.listInstances(10) }
                 if (!instances.isNullOrBlank() && instances != "{}") {
                     log("W", "EasyTier: found stale native instance(s) before start: $instances")
                 }
@@ -940,10 +977,12 @@ class EasyTierPlugin(private val context: Context) {
                 // listInstances may fail on some JNI versions; non-fatal
             }
             try {
-                EasyTierJNI.stopAllInstances()
+                withNative { EasyTierJNI.stopAllInstances() }
             } catch (e: Throwable) {
                 log("W", "EasyTier: failed to stop stale instances before start", e)
             }
+            // No verified listener exists until this start succeeds.
+            sessionActive = false
             clearMeshCidrsCache()
 
             // Register/deregister JNI log callback based on logEnabled setting
@@ -970,18 +1009,22 @@ class EasyTierPlugin(private val context: Context) {
             }
 
             // Parse first to catch config errors early.
-            val parseResult = EasyTierJNI.parseConfig(toml)
+            val (parseResult, parseError) = withNative {
+                EasyTierJNI.parseConfig(toml) to EasyTierJNI.getLastError()
+            }
             if (parseResult != 0) {
-                val err = EasyTierJNI.getLastError() ?: "unknown error (code=$parseResult)"
+                val err = parseError ?: "unknown error (code=$parseResult)"
                 log("E", "EasyTier config parse failed: $err")
                 setStatus("error", err)
                 return false
             }
 
             // Start the network instance.
-            val runResult = EasyTierJNI.runNetworkInstance(toml)
+            val (runResult, runError) = withNative {
+                EasyTierJNI.runNetworkInstance(toml) to EasyTierJNI.getLastError()
+            }
             if (runResult != 0) {
-                val err = EasyTierJNI.getLastError() ?: "unknown error (code=$runResult)"
+                val err = runError ?: "unknown error (code=$runResult)"
                 log("E", "EasyTier runNetworkInstance failed: $err")
                 setStatus("error", err)
                 return false
@@ -993,22 +1036,25 @@ class EasyTierPlugin(private val context: Context) {
             if (!waitForSocks5(config.socks5Port)) {
                 log("E", "EasyTier SOCKS5 listener on port ${config.socks5Port} not ready after all retries — aborting start")
                 try {
-                    EasyTierJNI.stopAllInstances()
+                    withNative { EasyTierJNI.stopAllInstances() }
                 } catch (e: Throwable) {
                     log("W", "EasyTier: failed to stop instance after SOCKS5 timeout", e)
                 }
-                setStatus("error", "SOCKS5 listener not ready on port ${config.socks5Port}")
+                sessionActive = false
+                setStatus("error", "SOCKS5 listener did not answer the SOCKS5 handshake on port ${config.socks5Port}")
                 return false
             }
 
             running = true
             currentConfig = config
+            sessionActive = true
             clearMeshCidrsCache()
             setStatus("running")
             log("I", "EasyTier instance '${config.instanceName}' started (SOCKS5 on 127.0.0.1:${config.socks5Port})")
             true
         } catch (e: Throwable) {
             // Catch Throwable, not just Exception — UnsatisfiedLinkError is an Error
+            sessionActive = false
             log("E", "Failed to start EasyTier instance", e)
             setStatus("error", "${e.javaClass.simpleName}: ${e.message}")
             false
@@ -1027,39 +1073,54 @@ class EasyTierPlugin(private val context: Context) {
     fun stop() {
         if (!running) return
         try {
-            EasyTierJNI.stopAllInstances()
+            withNative { EasyTierJNI.stopAllInstances() }
             log("I", "EasyTier instance stopped")
         } catch (e: Throwable) {
             log("E", "Failed to stop EasyTier instance", e)
         } finally {
             running = false
             currentConfig = null
+            sessionActive = false
             clearMeshCidrsCache()
             setStatus("stopped")
         }
     }
 
     /**
-     * Best-effort check that the SOCKS5 listener is accepting connections.
-     * Tries to connect to 127.0.0.1:[port] up to 5 times with 400ms delays.
-     * @return `true` if the listener accepted a connection within the retry
-     *   window, `false` if it was not ready after all attempts.
+     * Wait until the SOCKS5 listener answers the protocol greeting.
+     *
+     * A plain TCP connect is not sufficient: another process on the device can
+     * own the port, and accepting a connection would be mistaken for "EasyTier
+     * is ready" while Xray then hands mesh traffic to that process.  The probe
+     * in [Socks5Probe] also proves that the listener speaks SOCKS5.
+     *
+     * @return `true` if the listener answered within the retry window.
      */
     private fun waitForSocks5(port: Int): Boolean {
         for (attempt in 1..SOCKS5_MAX_ATTEMPTS) {
-            try {
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", port), SOCKS5_CONNECT_TIMEOUT_MS)
-                }
-                log("D", "EasyTier SOCKS5 listener ready on port $port (attempt $attempt)")
+            if (Socks5Probe.verify(
+                    "127.0.0.1",
+                    port,
+                    SOCKS5_CONNECT_TIMEOUT_MS,
+                    SOCKS5_READ_TIMEOUT_MS
+                )
+            ) {
+                log("D", "EasyTier SOCKS5 listener verified on port $port (attempt $attempt)")
                 return true
-            } catch (e: Throwable) {
-                if (attempt < SOCKS5_MAX_ATTEMPTS) {
+            }
+            if (attempt < SOCKS5_MAX_ATTEMPTS) {
+                try {
                     Thread.sleep(SOCKS5_RETRY_DELAY_MS)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return false
                 }
             }
         }
-        log("W", "EasyTier SOCKS5 listener on port $port not ready after $SOCKS5_MAX_ATTEMPTS attempts")
+        log(
+            "W",
+            "EasyTier SOCKS5 listener on port $port did not pass the SOCKS5 handshake after $SOCKS5_MAX_ATTEMPTS attempts"
+        )
         return false
     }
 
@@ -1067,7 +1128,7 @@ class EasyTierPlugin(private val context: Context) {
     fun isRunning(): Boolean {
         if (!running) return false
         return try {
-            val json = EasyTierJNI.collectNetworkInfos(10)
+            val json = withNative { EasyTierJNI.collectNetworkInfos(10) }
             if (json.isNullOrBlank()) return false
             val parsed = JsonParser.parseString(json)
             if (parsed.isJsonObject) {

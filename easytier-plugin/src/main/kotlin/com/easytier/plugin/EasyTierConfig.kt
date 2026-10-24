@@ -132,7 +132,10 @@ data class EasyTierConfig(
                 .replace("\n", " ")
                 .replace("\r", " ")
                 .replace("\t", " ")
-                .filter { it.code >= 0x20 } // strip remaining control chars
+                // TOML forbids raw control characters in basic strings;
+                // U+007F (DEL) is one of them and is not covered by the
+                // `>= 0x20` test alone.
+                .filter { it.code >= 0x20 && it.code != 0x7F }
         }
     }
 }

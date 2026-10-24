@@ -134,7 +134,9 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
     var networkName by rememberSaveable {
         mutableStateOf(EasyTierSettingsManager.getNetworkName(context))
     }
-    var networkSecret by rememberSaveable {
+    // Not rememberSaveable: the secret must not be written to the Activity's
+    // saved-instance-state bundle (the system persists it to disk).
+    var networkSecret by remember {
         mutableStateOf(EasyTierSettingsManager.getNetworkSecret(context))
     }
     var hostname by rememberSaveable {
@@ -266,6 +268,7 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 title = stringResource(R.string.easytier_pref_network_secret_title),
                 value = networkSecret,
                 isPassword = true,
+                maskInput = true,
                 onValueChanged = { newValue ->
                     networkSecret = newValue
                     EasyTierSettingsManager.setNetworkSecret(context, newValue)
