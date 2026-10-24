@@ -223,4 +223,103 @@ class EasyTierRoutePlannerTest {
             EasyTierRoutePlanner.parseList("10.144.144.1/24,\n192.168.50.5/24")
         )
     }
+
+    @Test
+    fun `peer advertisements broader than 16 bits are rejected`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = emptyList(),
+            vpnClientCidr = null,
+            meshCidrs = listOf("10.0.0.0/8", "192.168.0.0/16"),
+            virtualIp = null,
+            extraCidrs = emptyList()
+        )
+
+        assertEquals(listOf("192.168.0.0/16"), plan.easyTierCidrs)
+        assertTrue(plan.conflicts.any { it.cidr == "10.0.0.0/8" })
+    }
+
+    @Test
+    fun `a broad range stays trusted when the user adds it as an extra route`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            vpnClientCidr = null,
+            meshCidrs = emptyList(),
+            virtualIp = null,
+            extraCidrs = listOf("10.0.0.0/8")
+        )
+
+        assertTrue(plan.easyTierCidrs.contains("10.0.0.0/8"))
+        assertEquals(listOf("192.168.1.0/24"), plan.localLanCidrs)
+    }
+
+    @Test
+    fun `ipv6 peer advertisements must be at least a 48 bit prefix`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = emptyList(),
+            vpnClientCidr = null,
+            meshCidrs = listOf("fc00::/7", "fc00:1::/48"),
+            virtualIp = null,
+            extraCidrs = emptyList()
+        )
+
+        assertEquals(listOf("fc00:1::/48"), plan.easyTierCidrs)
+    }
+
+    @Test
+    fun `persisted routes follow the same peer policy`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = emptyList(),
+            vpnClientCidr = null,
+            meshCidrs = emptyList(),
+            virtualIp = null,
+            extraCidrs = emptyList(),
+            lastKnownCidrs = listOf("10.0.0.0/8")
+        )
+
+        assertTrue(plan.easyTierCidrs.isEmpty())
+    }
+
+    @Test
+    fun `a malformed route entry does not discard the other routes`() {
+        val json = """
+            {
+              "map": {
+                "mesh": {
+                  "running": true,
+                  "routes": [
+                    { "peer_id": 1, "proxy_cidrs": ["192.168.50.0/24"] },
+                    42,
+                    { "peer_id": 2, "proxy_cidrs": ["192.168.60.0/24"] }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+
+        val cidrs = EasyTierPlugin.parseMeshCidrs(json)
+
+        assertTrue(cidrs.contains("192.168.50.0/24"))
+        assertTrue(cidrs.contains("192.168.60.0/24"))
+    }
+
+    @Test
+    fun `a malformed instance entry does not discard the other instances`() {
+        val json = """
+            {
+              "map": {
+                "mesh": {
+                  "running": true,
+                  "routes": [
+                    { "peer_id": 1, "proxy_cidrs": ["192.168.70.0/24"] }
+                  ]
+                },
+                "broken": 7
+              }
+            }
+        """.trimIndent()
+
+        val cidrs = EasyTierPlugin.parseMeshCidrs(json)
+
+        assertTrue(cidrs.contains("192.168.70.0/24"))
+    }
 }

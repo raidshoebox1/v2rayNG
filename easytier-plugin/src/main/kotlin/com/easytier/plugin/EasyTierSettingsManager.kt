@@ -52,6 +52,19 @@ object EasyTierSettingsManager {
      */
     private const val LAST_ROUTES_FILE = "easytier_last_routes.json"
 
+    /**
+     * Last-known routes are only a bootstrap aid for the next start.  Stale
+     * entries would keep sending traffic for a peer that has left the mesh, so
+     * they expire.
+     */
+    const val LAST_ROUTES_TTL_MS = 24 * 60 * 60 * 1000L
+
+    /** Allowed MTU range for the EasyTier instance. */
+    private val MTU_RANGE = 576..9000
+
+    /** Privileged ports are reserved for the system; the plugin never needs one. */
+    private val SOCKS5_PORT_RANGE = 1024..65535
+
     /** Schema version for backup/restore format. Increment when the JSON shape changes. */
     private const val SCHEMA_VERSION = 2
 
@@ -281,7 +294,15 @@ object EasyTierSettingsManager {
         return secretPrefs(context)?.getString(KEY_NETWORK_SECRET, "") ?: ""
     }
 
-    fun getVirtualIp(context: Context): String? = getNullableStringPref(context, KEY_VIRTUAL_IP)
+    /**
+     * Stored virtual IP, or null when it is not a usable IPv4 address/prefix.
+     * An invalid value would otherwise be written to TOML and make the whole
+     * instance fail to start with an unrelated parser error.
+     */
+    fun getVirtualIp(context: Context): String? =
+        getNullableStringPref(context, KEY_VIRTUAL_IP)?.takeIf {
+            EasyTierRoutePlanner.normalizeVirtualIp(it) != null
+        }
 
     fun getPeers(context: Context): List<String> {
         val raw = getStringPref(context, KEY_PEERS, "")
@@ -291,12 +312,13 @@ object EasyTierSettingsManager {
     fun getSocks5Port(context: Context): Int {
         val stored = getStringPref(context, KEY_SOCKS5_PORT, DEFAULT_SOCKS5_PORT.toString()) ?: DEFAULT_SOCKS5_PORT.toString()
         val port = stored.toIntOrNull()
-        return if (port != null && port in 1..65535) port else DEFAULT_SOCKS5_PORT
+        return if (port != null && port in SOCKS5_PORT_RANGE) port else DEFAULT_SOCKS5_PORT
     }
 
     fun isLogEnabled(context: Context): Boolean = getBoolPref(context, KEY_LOG_ENABLED, true)
 
-    fun getMtu(context: Context): Int? = getStringPref(context, KEY_MTU, null)?.toIntOrNull()
+    fun getMtu(context: Context): Int? =
+        getStringPref(context, KEY_MTU, null)?.toIntOrNull()?.takeIf { it in MTU_RANGE }
 
     fun getLogLevel(context: Context): String = getStringPref(context, KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL
 
@@ -322,16 +344,11 @@ object EasyTierSettingsManager {
      */
     fun setLastKnownMeshCidrs(context: Context, cidrs: Collection<String>): Boolean {
         return try {
-            val safe = cidrs.filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
-                .distinct()
-                .sorted()
-            if (safe.isEmpty()) return false
             val file = lastRoutesFile(context)
             val tmp = File(file.parentFile, "$LAST_ROUTES_FILE.tmp")
-            val json = JsonObject().apply {
-                add("cidrs", com.google.gson.JsonArray().apply { safe.forEach { add(it) } })
-            }
-            tmp.writeText(json.toString())
+            // An empty set is written on purpose: it clears the routing
+            // baseline instead of leaving the previous peer's subnets behind.
+            tmp.writeText(LastKnownRoutes.encode(cidrs, System.currentTimeMillis()))
             tmp.renameTo(file)
         } catch (e: Throwable) {
             Log.w(TAG, "Failed to write last known mesh CIDRs", e)
@@ -343,13 +360,12 @@ object EasyTierSettingsManager {
         return try {
             val file = lastRoutesFile(context)
             if (!file.exists()) return emptyList()
-            val json = JsonParser.parseString(file.readText()).takeIf { it.isJsonObject }?.asJsonObject
-                ?: return emptyList()
-            val array = json.getAsJsonArray("cidrs") ?: return emptyList()
-            array.mapNotNull { it.takeIf { item -> item.isJsonPrimitive }?.asString }
-                .filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
-                .distinct()
-                .sorted()
+            LastKnownRoutes.decode(
+                raw = file.readText(),
+                fileModifiedAt = file.lastModified(),
+                now = System.currentTimeMillis(),
+                ttlMs = LAST_ROUTES_TTL_MS
+            )
         } catch (e: Throwable) {
             Log.w(TAG, "Failed to read last known mesh CIDRs", e)
             emptyList()
@@ -376,6 +392,11 @@ object EasyTierSettingsManager {
 
     fun setEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ENABLED, enabled).commit()
+        if (!enabled) {
+            // Disabling the plugin invalidates the routing baseline; the next
+            // enable must discover its own routes instead of inheriting them.
+            clearLastKnownMeshCidrs(context)
+        }
         writeSnapshot(context)
     }
 
@@ -386,6 +407,8 @@ object EasyTierSettingsManager {
 
     fun setNetworkName(context: Context, name: String) {
         prefs(context).edit().putString(KEY_NETWORK_NAME, name).commit()
+        // A different network has different peers and routes.
+        clearLastKnownMeshCidrs(context)
         writeSnapshot(context)
     }
 
@@ -396,6 +419,8 @@ object EasyTierSettingsManager {
             return
         }
         sp.edit().putString(KEY_NETWORK_SECRET, secret).commit()
+        // A different secret selects a different mesh; drop the old baseline.
+        clearLastKnownMeshCidrs(context)
         // No writeSnapshot() — secret is intentionally excluded from the snapshot file.
     }
 
@@ -406,11 +431,13 @@ object EasyTierSettingsManager {
 
     fun setPeers(context: Context, peers: List<String>) {
         prefs(context).edit().putString(KEY_PEERS, peers.joinToString(",")).commit()
+        // New entry points can lead to a different mesh.
+        clearLastKnownMeshCidrs(context)
         writeSnapshot(context)
     }
 
     fun setSocks5Port(context: Context, port: Int) {
-        if (port in 1..65535) {
+        if (port in SOCKS5_PORT_RANGE) {
             prefs(context).edit().putString(KEY_SOCKS5_PORT, port.toString()).commit()
             writeSnapshot(context)
         }
@@ -500,32 +527,31 @@ object EasyTierSettingsManager {
     // ------------------------------------------------------------------
 
     /**
-     * Export all EasyTier settings (including the network secret in plaintext)
-     * to a [JsonObject] suitable for inclusion in v2rayNG's backup ZIP.
+     * Export EasyTier settings to a [JsonObject] for v2rayNG's backup ZIP.
      *
-     * The network secret is included in plaintext so that it survives a
-     * backup → uninstall → install → restore cycle, where the signing key
-     * (and thus the Android Keystore key used by EncryptedSharedPreferences)
-     * may have changed.  [importFromJson] re-encrypts the secret on restore.
+     * Secrets are excluded by default: a v2rayNG backup is a plain ZIP, so
+     * writing the mesh secret into it would hand the network credential to
+     * anyone who receives the file (support uploads, cloud sync, chat).  The
+     * secret does not need to travel with the backup for the common
+     * backup → uninstall → install → restore cycle on the same device:
+     * [importFromJson] only overwrites the secret when the JSON carries one,
+     * so the existing encrypted value is preserved.  Moving to a new device
+     * requires re-entering the secret, which is the intended trade-off.
      *
-     * **Security note:** Peer URIs (the `easytier_peers` field) may contain
-     * embedded credentials (e.g. `tcp://user:pass@host:port`).  These are
-     * stored in plaintext in the backup JSON, at the same security level as
-     * v2rayNG's own server settings.  The backup ZIP should be protected by
-     * a strong password and not shared or transmitted over insecure channels.
-     * The cross-process snapshot file (`easytier_config.json`) and status
-     * snapshot file (`easytier_status.json`) are excluded from ADB backups
-     * via `easytier_backup_rules.xml`.
+     * Peer URIs (the `easytier_peers` field) can still embed credentials; they
+     * are stored at the same level as v2rayNG's own server settings, so the
+     * backup file must not be shared casually.
      *
-     * The JSON includes a `__version` field for forward-compatible migration.
+     * @param includeSecrets when true, also writes the network secret in
+     *   plaintext.  Only for callers that explicitly accept that risk.
      */
-    fun exportToJson(context: Context): JsonObject {
+    fun exportToJson(context: Context, includeSecrets: Boolean = false): JsonObject {
         val ctx = context.applicationContext
         val json = buildSettingsJsonObject(ctx, includeVersion = true)
-        // Network secret is NOT in buildSettingsJsonObject (it lives only in
-        // EncryptedSharedPreferences), so add it separately for backup.
-        json.addProperty(KEY_NETWORK_SECRET, getNetworkSecret(ctx))
-        Log.i(TAG, "exportToJson: exported ${json.size()} keys")
+        if (includeSecrets) {
+            json.addProperty(KEY_NETWORK_SECRET, getNetworkSecret(ctx))
+        }
+        Log.i(TAG, "exportToJson: exported ${json.size()} keys (includeSecrets=$includeSecrets)")
         return json
     }
 
@@ -568,15 +594,25 @@ object EasyTierSettingsManager {
         json.get(KEY_NETWORK_NAME)?.takeIf { it.isJsonPrimitive }?.asString?.let {
             editor.putString(KEY_NETWORK_NAME, it); hasAny = true
         }
-        json.get(KEY_VIRTUAL_IP)?.takeIf { it.isJsonPrimitive }?.asString?.let {
-            editor.putString(KEY_VIRTUAL_IP, it.ifBlank { null }); hasAny = true
+        json.get(KEY_VIRTUAL_IP)?.takeIf { it.isJsonPrimitive }?.asString?.let { raw ->
+            val value = raw.trim()
+            when {
+                value.isEmpty() -> {
+                    editor.putString(KEY_VIRTUAL_IP, null); hasAny = true
+                }
+                // Reject anything that is not a usable IPv4 address/prefix;
+                // it would otherwise be written to TOML and fail at start.
+                EasyTierRoutePlanner.normalizeVirtualIp(value) != null -> {
+                    editor.putString(KEY_VIRTUAL_IP, value); hasAny = true
+                }
+            }
         }
         json.get(KEY_PEERS)?.takeIf { it.isJsonPrimitive }?.asString?.let { peersStr ->
             val peers = peersStr.split(",").map { p -> p.trim() }.filter { it.isNotEmpty() }
             editor.putString(KEY_PEERS, peers.joinToString(",")); hasAny = true
         }
         json.get(KEY_SOCKS5_PORT)?.takeIf { it.isJsonPrimitive }?.asInt?.let { port ->
-            if (port in 1..65535) {
+            if (port in SOCKS5_PORT_RANGE) {
                 editor.putString(KEY_SOCKS5_PORT, port.toString()); hasAny = true
             }
         }
@@ -586,7 +622,7 @@ object EasyTierSettingsManager {
         // MTU: only write if the value parses as a valid integer; an empty
         // or non-numeric string would otherwise clear the stored value.
         json.get(KEY_MTU)?.takeIf { it.isJsonPrimitive }?.asString?.let { mtuStr ->
-            mtuStr.toIntOrNull()?.let { mtu ->
+            mtuStr.toIntOrNull()?.takeIf { it in MTU_RANGE }?.let { mtu ->
                 editor.putString(KEY_MTU, mtu.toString()); hasAny = true
             }
         }
@@ -613,6 +649,10 @@ object EasyTierSettingsManager {
         json.get(KEY_NETWORK_SECRET)?.takeIf { it.isJsonPrimitive }?.asString?.let {
             setNetworkSecret(ctx, it)
         }
+
+        // An import can change the network identity and its peers; never
+        // inherit the previous mesh's routing baseline.
+        clearLastKnownMeshCidrs(ctx)
 
         // Write the cross-process snapshot file from the now-persisted
         // SharedPreferences so the VPN service process sees the restored values.

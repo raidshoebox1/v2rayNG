@@ -83,6 +83,23 @@ object CoreServiceManager {
     @Volatile
     private var easyTierPausedByScreenOff = false
 
+    /**
+     * Guards [easyTierPausedByScreenOff] and [easyTierPauseGeneration].
+     *
+     * Screen on/off broadcasts and the background resume thread race on the
+     * pause state.  A resume captures the generation it started with; a
+     * screen-off that arrives meanwhile bumps the generation, so the resume
+     * thread knows it must stop the instance it just started instead of
+     * clearing the pause flag.
+     */
+    private val easyTierPauseLock = Any()
+
+    /** Incremented on every screen-off; see [easyTierPauseLock]. */
+    private var easyTierPauseGeneration = 0
+
+    /** True while a screen-on resume thread runs; see [easyTierPauseLock]. */
+    private var easyTierResumeInFlight = false
+
     var serviceControl: SoftReference<ServiceControl>? = null
         set(value) {
             field = value
@@ -716,8 +733,16 @@ object CoreServiceManager {
                     NotificationManager.stopSpeedNotification()
                     // Pause EasyTier if pause-on-screen-off is enabled
                     if (EasyTierSettingsManager.isPauseOnScreenOff(serviceControl.getService())) {
-                        if (!easyTierPausedByScreenOff) {
-                            easyTierPausedByScreenOff = true
+                        val shouldStop = synchronized(easyTierPauseLock) {
+                            easyTierPauseGeneration++
+                            if (easyTierPausedByScreenOff) {
+                                false
+                            } else {
+                                easyTierPausedByScreenOff = true
+                                true
+                            }
+                        }
+                        if (shouldStop) {
                             EasyTierPlugin.log("I", "EasyTier: pausing mesh networking on screen off")
                             stopEasyTier(serviceControl.getService())
                         }
@@ -728,17 +753,50 @@ object CoreServiceManager {
                     LogUtil.i(AppConfig.TAG, "StartCore-Manager: Screen on")
                     NotificationManager.startSpeedNotification()
                     // Resume EasyTier if it was paused by screen-off
-                    if (easyTierPausedByScreenOff) {
-                        easyTierPausedByScreenOff = false
+                    val resumeGeneration = synchronized(easyTierPauseLock) {
+                        // Only one resume may run at a time: duplicate
+                        // SCREEN_ON broadcasts must not start two instances.
+                        if (easyTierPausedByScreenOff && !easyTierResumeInFlight) {
+                            easyTierResumeInFlight = true
+                            easyTierPauseGeneration
+                        } else {
+                            -1
+                        }
+                    }
+                    if (resumeGeneration >= 0) {
                         val svc = serviceControl.getService()
                         Thread {
-                            EasyTierPlugin.log("I", "EasyTier: resuming mesh networking on screen on")
-                            startEasyTier(svc)
-                            // Re-check the flag in case the screen was turned off again
-                            // while startEasyTier was running (~2s startup delay).
-                            if (easyTierPausedByScreenOff) {
-                                EasyTierPlugin.log("I", "EasyTier: screen turned off during resume, re-pausing")
-                                stopEasyTier(svc)
+                            try {
+                                // A screen-off may have arrived between the
+                                // broadcast and this thread; do not start then.
+                                if (!synchronized(easyTierPauseLock) {
+                                        easyTierPausedByScreenOff &&
+                                            easyTierPauseGeneration == resumeGeneration
+                                    }
+                                ) {
+                                    return@Thread
+                                }
+                                EasyTierPlugin.log("I", "EasyTier: resuming mesh networking on screen on")
+                                startEasyTier(svc)
+                                // The pause flag is only cleared when no newer
+                                // screen-off event happened while starting
+                                // (~2s startup delay).  Otherwise re-pause.
+                                val screenTurnedOff = synchronized(easyTierPauseLock) {
+                                    if (easyTierPauseGeneration != resumeGeneration) {
+                                        true
+                                    } else {
+                                        easyTierPausedByScreenOff = false
+                                        false
+                                    }
+                                }
+                                if (screenTurnedOff) {
+                                    EasyTierPlugin.log("I", "EasyTier: screen turned off during resume, re-pausing")
+                                    stopEasyTier(svc)
+                                }
+                            } finally {
+                                synchronized(easyTierPauseLock) {
+                                    easyTierResumeInFlight = false
+                                }
                             }
                         }.apply {
                             name = "EasyTierScreenOnResume"

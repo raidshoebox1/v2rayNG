@@ -218,8 +218,10 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
                 val easyTierFile = File(backupDir, "easytier_settings.json")
                 if (easyTierFile.exists()) {
                     // Snapshot current EasyTier settings before overwriting
+                    // In-memory rollback snapshot only: it never reaches the ZIP,
+                    // so it may include the secret to make the rollback complete.
                     val previousSettings: JsonObject? = try {
-                        EasyTierSettingsManager.exportToJson(app)
+                        EasyTierSettingsManager.exportToJson(app, includeSecrets = true)
                     } catch (e: Exception) {
                         LogUtil.w(AppConfig.TAG, "Could not snapshot EasyTier settings for rollback: ${e.message}")
                         null

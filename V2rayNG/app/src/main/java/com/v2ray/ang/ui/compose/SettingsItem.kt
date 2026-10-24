@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.v2ray.ang.R
@@ -132,6 +133,7 @@ fun SettingsEditItem(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     isPassword: Boolean = false,
+    maskInput: Boolean = false,
     keyboardNumber: Boolean = false
 ) {
     var showDialog by remember { mutableStateOf(false) }
@@ -160,7 +162,11 @@ fun SettingsEditItem(
                 InputField(
                     label = title,
                     value = text,
-                    visualTransformation = VisualTransformation.None
+                    visualTransformation = if (maskInput) {
+                        PasswordVisualTransformation()
+                    } else {
+                        VisualTransformation.None
+                    }
                 )
             ),
             onFieldChange = { _, v -> text = v },

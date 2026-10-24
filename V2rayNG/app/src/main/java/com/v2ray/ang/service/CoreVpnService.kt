@@ -274,7 +274,11 @@ class CoreVpnService : VpnService(), ServiceControl {
 // would be queried directly.  Old EasyTier builds captured the whole private
 // space and therefore sent DNS through Xray's dns-out module; this host route
 // preserves that DNS behaviour without capturing LocalSend/KDE Connect.
-        if (bypassLan) {
+        // Only capture the LAN resolver when EasyTier is enabled: the host
+        // route exists to keep DNS inside the tunnel for an EasyTier stack
+        // that boots with bypass-LAN.  Without EasyTier the upstream behaviour
+        // (no capture) must be preserved.
+        if (bypassLan && EasyTierSettingsManager.isEnabled(this)) {
             val privateDnsCidrs = LinkedHashSet<String>()
             SettingsManager.getVpnDnsServers()
                 .filter { Utils.isPureIpAddress(it) && !it.contains(":") }

@@ -44,6 +44,7 @@
     <application
         android:name=".AngApplication"
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/easytier_data_extraction_rules"
         android:fullBackupContent="@xml/easytier_backup_rules"
         android:banner="@mipmap/ic_banner"
         android:icon="@mipmap/ic_launcher"

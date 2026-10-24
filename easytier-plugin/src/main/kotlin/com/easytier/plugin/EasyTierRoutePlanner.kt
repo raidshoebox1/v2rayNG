@@ -232,6 +232,17 @@ object EasyTierRoutePlanner {
     /** Safety cap for CIDR subtraction; a /8 minus a /24 needs at most ~20 blocks. */
     private const val MAX_ROUTES_PER_CANDIDATE = 256
 
+    /** Peer advertisements must be at least this specific (IPv4). */
+    const val MIN_PEER_IPV4_PREFIX = 16
+
+    /** Peer advertisements must be at least this specific (IPv6). */
+    const val MIN_PEER_IPV6_PREFIX = 48
+
+    /** Conflict reason used when a peer advertises an overly broad range. */
+    const val PEER_RANGE_TOO_BROAD =
+        "rejected: peer advertisement is broader than /16 (IPv4) or /48 (IPv6); " +
+            "add it as an extra route to trust it"
+
     /**
      * Build a route plan.
      *
@@ -271,7 +282,25 @@ object EasyTierRoutePlanner {
             }
         }
 
-        (meshCidrs + extraCidrs + lastKnownCidrs).forEach { raw ->
+        // Peer-advertised ranges arrive over the network and are untrusted, so
+        // they must stay specific: otherwise one mesh member could advertise
+        // 10/8 or 192.168/16 and capture every private destination the device
+        // talks to.  Ranges entered by the local user ("extra routes") are an
+        // explicit trust decision and keep the wider isSafeMeshCidr policy.
+        (meshCidrs + lastKnownCidrs).forEach { raw ->
+            val cidr = EasyTierCidr.parse(raw)?.let(::networkOf) ?: return@forEach
+            when {
+                !isSafeMeshCidr(cidr.toString()) -> conflicts.add(
+                    EasyTierRouteConflict(cidr.toString(), "rejected: not a private mesh range")
+                )
+                !isAcceptablePeerCidr(cidr.toString()) -> conflicts.add(
+                    EasyTierRouteConflict(cidr.toString(), PEER_RANGE_TOO_BROAD)
+                )
+                else -> candidates.add(cidr)
+            }
+        }
+
+        extraCidrs.forEach { raw ->
             val cidr = EasyTierCidr.parse(raw)?.let(::networkOf) ?: return@forEach
             if (isSafeMeshCidr(cidr.toString())) {
                 candidates.add(cidr)
@@ -369,6 +398,23 @@ object EasyTierRoutePlanner {
                 else -> false
             }
         }
+    }
+
+    /**
+     * Whether a range advertised by a mesh peer is specific enough to be
+     * trusted for routing.
+     *
+     * Peer advertisements are network input, not local configuration.  A
+     * member that advertises `10.0.0.0/8` or `192.168.0.0/16` would otherwise
+     * redirect every private destination of this device into the mesh.  Only
+     * ranges of /16 (IPv4) or /48 (IPv6) and narrower are accepted; broader
+     * ranges must be added explicitly as extra routes.
+     */
+    fun isAcceptablePeerCidr(cidr: String): Boolean {
+        val parsed = EasyTierCidr.parse(cidr) ?: return false
+        if (!isSafeMeshCidr(parsed.toString())) return false
+        val minimumPrefix = if (parsed.isIpv6) MIN_PEER_IPV6_PREFIX else MIN_PEER_IPV4_PREFIX
+        return parsed.prefixLength >= minimumPrefix
     }
 
     /**

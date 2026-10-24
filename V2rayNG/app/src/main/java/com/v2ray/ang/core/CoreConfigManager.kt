@@ -1370,6 +1370,17 @@ object CoreConfigManager {
      * range baseline is deliberately not used.
      */
     private fun injectEasyTier(context: Context, v2rayConfig: V2rayConfig) {
+        // Fail closed: a rule may only point at an EasyTier listener that this
+        // process started and verified.  Without this check the rule would be
+        // written even when EasyTier failed to start, handing mesh traffic to
+        // whatever process owns the loopback port.
+        if (!EasyTierPlugin.isSessionActive()) {
+            LogUtil.w(
+                AppConfig.TAG,
+                "EasyTier: no verified listener in this process; skipping route injection"
+            )
+            return
+        }
         val plan = buildEasyTierRoutePlan(context) ?: return
         if (plan.easyTierCidrs.isEmpty() && plan.localLanCidrs.isEmpty()) return
 
@@ -1419,6 +1430,9 @@ object CoreConfigManager {
      * @return Modified JSON string, or the original if EasyTier is disabled or injection fails.
      */
     private fun injectEasyTierIntoCustomConfig(context: Context, json: String): String {
+        // Same fail-closed rule as injectEasyTier: never rewrite a user config
+        // to point at a listener this process does not own.
+        if (!EasyTierPlugin.isSessionActive()) return json
         val plan = buildEasyTierRoutePlan(context) ?: return json
         if (plan.easyTierCidrs.isEmpty() && plan.localLanCidrs.isEmpty()) return json
 
