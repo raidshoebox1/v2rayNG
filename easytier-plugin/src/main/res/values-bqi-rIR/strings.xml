@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="easytier_pref_bypass_local_lan_title">شبکه محلی مستقیم بمو</string>
-    <string name="easytier_pref_bypass_local_lan_summary">ترافیک به زیرشبکه Wi-Fi یا Ethernet ای دستگاه مستقیم مونه تا LocalSend، KDE Connect و mDNS کار کنن. فقط اگه می‌خوای ترافیک LAN از mesh عبور کنه خاموشش کن.</string>
+    <string name="easytier_pref_bypass_local_lan_summary">ترافیک به زیرشبکه Wi-Fi یا Ethernet ای دستگاه مستقیم مونه. فقط اگه می‌خوای ترافیک LAN از mesh عبور کنه خاموشش کن.</string>
     <string name="easytier_pref_extra_routes_title">مسیرهای اضافی EasyTier</string>
     <string name="easytier_full_tunnel_warning">EasyTier با VPN تونل کامل فعاله. کشف LAN (mDNS/broadcast) شاید کار نکنه؛ عبور از LAN در حالت VPN را فعال کن.</string>
     <string name="easytier_status_local_lan">شبکه محلی (مستقیم):</string>
@@ -11,6 +11,6 @@
     <string name="easytier_status_extra_routes">مسیرهای اضافی:</string>
     <string name="easytier_warning_extra_route_unadvertised">مسیر اضافی %1$s توسط هیچ peer EasyTier اعلام نشده؛ proxy_networks روی روترها را بررسی کن.</string>
     <string name="easytier_warning_broad_mesh_cidr">یک peer شبکه بزرگ %1$s را اعلام می‌کند؛ برای جلوگیری از ابهام مسیریابی mesh از proxy_networks /24 برای هر سایت استفاده کن.</string>
-    <string name="easytier_warning_per_app_proxy">پروکسی هر برنامه فعاله؛ برنامه‌هایی که VPN را دور می‌زنن نمی‌تونن از مسیرهای EasyTier استفاده کنن. لیست عبور KDE Connect و LocalSend را بررسی کن.</string>
+    <string name="easytier_warning_per_app_proxy">پروکسی هر برنامه فعاله؛ برنامه‌هایی که VPN را دور می‌زنن نمی‌تونن از مسیرهای EasyTier استفاده کنن. لیست عبور VPN را بررسی کن.</string>
     <string name="easytier_peer_proxy_cidrs">پروکسی: %1$s</string>
 </resources>
