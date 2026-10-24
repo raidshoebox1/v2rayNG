@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import com.easytier.plugin.EasyTierCidr
+import com.easytier.plugin.EasyTierRoutePlanner
 import com.v2ray.ang.AppConfig
 import java.net.Inet4Address
 
@@ -45,7 +46,16 @@ object NetworkRouteUtil {
                     val prefix = linkAddress.prefixLength
                     if (prefix !in 1..31) continue
                     val cidr = EasyTierCidr.parse("${address.hostAddress}/$prefix")?.toString()
-                    if (cidr != null) result.add(cidr)
+                    // Only private/special-use local subnets may become direct
+                    // rules.  A public Wi-Fi subnet must not bypass the proxy.
+                    if (cidr != null && EasyTierRoutePlanner.isSafeMeshCidr(cidr)) {
+                        result.add(cidr)
+                    } else if (cidr != null) {
+                        LogUtil.w(
+                            AppConfig.TAG,
+                            "NetworkRouteUtil: ignoring non-private local subnet $cidr"
+                        )
+                    }
                 }
             }
         } catch (e: Throwable) {
