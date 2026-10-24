@@ -26,6 +26,7 @@ import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.NetworkRouteUtil
 import com.v2ray.ang.util.Utils
 import com.easytier.plugin.EasyTierPlugin
+import com.easytier.plugin.EasyTierCidr
 import com.easytier.plugin.EasyTierRoutePlanner
 import com.easytier.plugin.EasyTierSettingsManager
 import java.lang.ref.SoftReference
@@ -266,6 +267,30 @@ class CoreVpnService : VpnService(), ServiceControl {
                 builder.addRoute("fc00::", 18) // Xray-core default FakeIPv6 Pool
             } else {
                 builder.addRoute("::", 0)
+            }
+        }
+
+        // When the VPN bypasses the LAN, private DNS servers (usually the router)
+// would be queried directly.  Old EasyTier builds captured the whole private
+// space and therefore sent DNS through Xray's dns-out module; this host route
+// preserves that DNS behaviour without capturing LocalSend/KDE Connect.
+        if (bypassLan) {
+            val privateDnsCidrs = LinkedHashSet<String>()
+            SettingsManager.getVpnDnsServers()
+                .filter { Utils.isPureIpAddress(it) && !it.contains(":") }
+                .forEach { dns ->
+                    val cidr = EasyTierCidr.parse("$dns/32")?.toString() ?: return@forEach
+                    if (EasyTierRoutePlanner.isSafeMeshCidr(cidr)) {
+                        privateDnsCidrs.add(cidr)
+                    }
+                }
+            privateDnsCidrs.addAll(NetworkRouteUtil.collectPrivateDnsHostRoutes(this))
+            privateDnsCidrs.forEach { cidr ->
+                val parts = cidr.split('/')
+                if (parts.size == 2) {
+                    builder.addRoute(parts[0], 32)
+                    LogUtil.i(AppConfig.TAG, "EasyTier: added private DNS host route: $cidr")
+                }
             }
         }
 

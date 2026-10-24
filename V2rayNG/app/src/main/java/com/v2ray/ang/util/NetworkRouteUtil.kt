@@ -64,6 +64,41 @@ object NetworkRouteUtil {
         return result.toList()
     }
 
+    /**
+     * Returns /32 host routes for private DNS servers of the physical LANs.
+     *
+     * When the VPN bypasses the LAN, a private resolver (usually the router)
+     * would otherwise be queried directly.  Capturing it with a host route
+     * lets Xray's dns-out module handle the query, matching the behaviour of
+     * the old broad-private-route builds without capturing LocalSend/KDE
+     * Connect traffic.
+     */
+    fun collectPrivateDnsHostRoutes(context: Context): List<String> {
+        val connectivity = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return emptyList()
+
+        val result = LinkedHashSet<String>()
+        try {
+            @Suppress("DEPRECATION")
+            for (network in connectivity.allNetworks) {
+                val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
+                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+                if (!isPhysicalLan(capabilities)) continue
+
+                val linkProperties = connectivity.getLinkProperties(network) ?: continue
+                for (dns in linkProperties.dnsServers) {
+                    if (dns !is Inet4Address) continue
+                    val cidr = EasyTierCidr.parse("${dns.hostAddress}/32")?.toString() ?: continue
+                    if (EasyTierRoutePlanner.isSafeMeshCidr(cidr)) result.add(cidr)
+                }
+            }
+        } catch (e: Throwable) {
+            LogUtil.w(AppConfig.TAG, "NetworkRouteUtil: failed to collect private DNS routes", e)
+        }
+        return result.toList()
+    }
+
     private fun isPhysicalLan(capabilities: NetworkCapabilities): Boolean {
         if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return true
         if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return true
