@@ -89,7 +89,7 @@
     <string name="easytier_pref_pause_on_screen_off_title">Pause on Screen Off</string>
     <string name="easytier_pref_pause_on_screen_off_summary">Stops EasyTier mesh networking when the screen turns off to drastically reduce idle battery drain. Mesh routing resumes automatically when the screen turns on. VPN connectivity is unaffected.</string>
     <string name="easytier_pref_bypass_local_lan_title">Keep Local LAN Direct</string>
-    <string name="easytier_pref_bypass_local_lan_summary">Traffic to this device Wi-Fi or Ethernet subnet stays direct, so LocalSend, KDE Connect and mDNS keep working. Disable only if you intentionally want local LAN traffic to use the mesh.</string>
+    <string name="easytier_pref_bypass_local_lan_summary">Traffic to the Wi-Fi or Ethernet subnet of this device stays direct. Disable only if you intentionally want local LAN traffic to use the mesh.</string>
     <string name="easytier_pref_extra_routes_title">Extra EasyTier Routes</string>
     <string name="easytier_full_tunnel_warning">EasyTier is enabled with full-tunnel VPN. LAN discovery (mDNS/broadcast) may still fail; enable Bypass LAN in VPN mode for best results.</string>
     <string name="easytier_status_local_lan">Local LAN (direct):</string>
@@ -99,6 +99,6 @@
     <string name="easytier_status_extra_routes">Extra routes:</string>
     <string name="easytier_warning_extra_route_unadvertised">Extra route %1$s is not advertised by any EasyTier peer; check proxy_networks on the routers.</string>
     <string name="easytier_warning_broad_mesh_cidr">A peer advertises the broad subnet %1$s; prefer per-site /24 proxy_networks to avoid ambiguous mesh routing.</string>
-    <string name="easytier_warning_per_app_proxy">Per-app proxy is enabled; apps that bypass the VPN cannot use EasyTier routes. Check the bypass list for KDE Connect and LocalSend.</string>
+    <string name="easytier_warning_per_app_proxy">Per-app proxy is enabled; apps excluded from the VPN cannot use EasyTier routes. Check the VPN bypass list.</string>
     <string name="easytier_peer_proxy_cidrs">proxy: %1$s</string>
 </resources>

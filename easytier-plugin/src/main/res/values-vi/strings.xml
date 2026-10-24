@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="easytier_pref_bypass_local_lan_title">Giữ mạng LAN cục bộ trực tiếp</string>
-    <string name="easytier_pref_bypass_local_lan_summary">Lưu lượng đến mạng Wi-Fi hoặc Ethernet của thiết bị này vẫn đi trực tiếp, để LocalSend, KDE Connect và mDNS tiếp tục hoạt động. Chỉ tắt nếu bạn muốn lưu lượng LAN cục bộ đi qua mesh.</string>
+    <string name="easytier_pref_bypass_local_lan_summary">Lưu lượng đến mạng Wi-Fi hoặc Ethernet của thiết bị này vẫn đi trực tiếp. Chỉ tắt nếu bạn muốn lưu lượng LAN cục bộ đi qua mesh.</string>
     <string name="easytier_pref_extra_routes_title">Tuyến EasyTier bổ sung</string>
     <string name="easytier_full_tunnel_warning">EasyTier đang bật với VPN toàn phần. Khám phá LAN (mDNS/broadcast) có thể vẫn lỗi; hãy bật Bỏ qua LAN trong chế độ VPN.</string>
     <string name="easytier_status_local_lan">LAN cục bộ (trực tiếp):</string>
@@ -11,6 +11,6 @@
     <string name="easytier_status_extra_routes">Tuyến bổ sung:</string>
     <string name="easytier_warning_extra_route_unadvertised">Tuyến bổ sung %1$s không được peer EasyTier nào quảng bá; hãy kiểm tra proxy_networks trên router.</string>
     <string name="easytier_warning_broad_mesh_cidr">Một peer quảng bá mạng lớn %1$s; nên dùng proxy_networks /24 cho từng site để tránh định tuyến mesh mơ hồ.</string>
-    <string name="easytier_warning_per_app_proxy">Đang bật proxy theo ứng dụng; ứng dụng bỏ qua VPN không thể dùng tuyến EasyTier. Hãy kiểm tra danh sách bỏ qua của KDE Connect và LocalSend.</string>
+    <string name="easytier_warning_per_app_proxy">Đang bật proxy theo ứng dụng; ứng dụng bỏ qua VPN không thể dùng tuyến EasyTier. Hãy kiểm tra danh sách bỏ qua của VPN.</string>
     <string name="easytier_peer_proxy_cidrs">proxy: %1$s</string>
 </resources>

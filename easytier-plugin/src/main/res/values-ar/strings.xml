@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="easytier_pref_bypass_local_lan_title">إبقاء الشبكة المحلية مباشرة</string>
-    <string name="easytier_pref_bypass_local_lan_summary">تبقى حركة المرور إلى شبكة Wi-Fi أو Ethernet لهذا الجهاز مباشرة، لتعمل LocalSend وKDE Connect وmDNS. عطّله فقط إذا كنت تريد تمرير حركة LAN عبر mesh.</string>
+    <string name="easytier_pref_bypass_local_lan_summary">تبقى حركة المرور إلى شبكة Wi-Fi أو Ethernet لهذا الجهاز مباشرة. عطّله فقط إذا كنت تريد تمرير حركة LAN عبر mesh.</string>
     <string name="easytier_pref_extra_routes_title">مسارات EasyTier الإضافية</string>
     <string name="easytier_full_tunnel_warning">EasyTier مفعّل مع VPN كامل. قد يفشل اكتشاف LAN (mDNS/broadcast)؛ فعّل تجاوز LAN في وضع VPN.</string>
     <string name="easytier_status_local_lan">الشبكة المحلية (مباشرة):</string>
@@ -11,6 +11,6 @@
     <string name="easytier_status_extra_routes">المسارات الإضافية:</string>
     <string name="easytier_warning_extra_route_unadvertised">المسار الإضافي %1$s غير معلن من أي peer في EasyTier؛ تحقق من proxy_networks على الراوترات.</string>
     <string name="easytier_warning_broad_mesh_cidr">يعلن peer عن شبكة واسعة %1$s؛ يفضل استخدام proxy_networks /24 لكل موقع لتجنب غموض توجيه mesh.</string>
-    <string name="easytier_warning_per_app_proxy">تم تمكين وكيل التطبيقات؛ التطبيقات التي تتجاوز VPN لا يمكنها استخدام مسارات EasyTier. تحقق من قائمة التجاوز لـ KDE Connect وLocalSend.</string>
+    <string name="easytier_warning_per_app_proxy">تم تمكين وكيل التطبيقات؛ التطبيقات التي تتجاوز VPN لا يمكنها استخدام مسارات EasyTier. تحقق من قائمة التجاوز في VPN.</string>
     <string name="easytier_peer_proxy_cidrs">الوكيل: %1$s</string>
 </resources>
