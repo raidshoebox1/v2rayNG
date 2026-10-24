@@ -97,6 +97,9 @@ class EasyTierSettingsActivity : BaseComponentActivity() {
         // Ensure the cross-process snapshot file is up-to-date so the VPN
         // service process sees the latest settings.
         EasyTierSettingsManager.flushSnapshot(applicationContext)
+        // Tell the VPN process that somebody is looking at the status again,
+        // so its writer returns to the fast cadence.
+        EasyTierPlugin.markStatusWatch(applicationContext)
     }
 
     override fun onPause() {
@@ -104,6 +107,7 @@ class EasyTierSettingsActivity : BaseComponentActivity() {
         // Stop any test instance started from this activity — it should not
         // outlive the settings activity.
         EasyTierPlugin.stopTest()
+        EasyTierPlugin.clearStatusWatch(applicationContext)
         // Safety net: flush the snapshot even if an individual setter missed it.
         EasyTierSettingsManager.flushSnapshot(applicationContext)
     }
@@ -157,6 +161,9 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
     var pauseOnScreenOff by rememberSaveable {
         mutableStateOf(EasyTierSettingsManager.isPauseOnScreenOff(context))
     }
+    var powerSaving by rememberSaveable {
+        mutableStateOf(EasyTierSettingsManager.isPowerSaving(context))
+    }
     var bypassLocalLan by rememberSaveable {
         mutableStateOf(EasyTierSettingsManager.isBypassLocalLan(context))
     }
@@ -191,6 +198,9 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 EasyTierPlugin.getPeerStatus(context)
             }
             statusText = formatStatus(context, status)
+            // Keeps the watch marker fresh (throttled to one write a minute)
+            // so the writer stays at the fast cadence while this screen is up.
+            EasyTierPlugin.refreshStatusWatch(context)
             delay(2000)
         }
     }
@@ -223,6 +233,15 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 onCheckedChange = {
                     enabled = it
                     EasyTierSettingsManager.setEnabled(context, it)
+                }
+            )
+            SettingsSwitchItem(
+                title = stringResource(R.string.easytier_pref_power_saving_title),
+                summary = stringResource(R.string.easytier_pref_power_saving_summary),
+                checked = powerSaving,
+                onCheckedChange = {
+                    powerSaving = it
+                    EasyTierSettingsManager.setPowerSaving(context, it)
                 }
             )
             SettingsSwitchItem(

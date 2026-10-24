@@ -13,4 +13,6 @@
     <string name="easytier_warning_broad_mesh_cidr">একটি peer বড় নেটওয়ার্ক %1$s ঘোষণা করছে; mesh রাউটিং বিভ্রান্তি এড়াতে প্রতি সাইটে /24 proxy_networks ব্যবহার করুন।</string>
     <string name="easytier_warning_per_app_proxy">অ্যাপভিত্তিক প্রক্সি চালু আছে; VPN এড়িয়ে যাওয়া অ্যাপ EasyTier রুট ব্যবহার করতে পারবে না। VPN-এর এড়ানোর তালিকা পরীক্ষা করুন।</string>
     <string name="easytier_peer_proxy_cidrs">প্রক্সি: %1$s</string>
+    <string name="easytier_pref_power_saving_title">পাওয়ার সেভিং মোড</string>
+    <string name="easytier_pref_power_saving_summary">অলস অবস্থায় NAT পাঞ্চিং বন্ধ রাখে এবং রুট ও হার্টবিট সিঙ্ক্রোনাইজেশন ধীর করে। অপেক্ষমাণ অবস্থায় ব্যাটারি খরচ উল্লেখযোগ্যভাবে কমে; নতুন পিয়ারে প্রথম সংযোগে ১–২ সেকেন্ড বেশি লাগতে পারে।</string>
 </resources>

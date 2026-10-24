@@ -88,6 +88,8 @@
     <!-- Power saving -->
     <string name="easytier_pref_pause_on_screen_off_title">Pause on Screen Off</string>
     <string name="easytier_pref_pause_on_screen_off_summary">Stops EasyTier mesh networking when the screen turns off to drastically reduce idle battery drain. Mesh routing resumes automatically when the screen turns on. VPN connectivity is unaffected.</string>
+    <string name="easytier_pref_power_saving_title">Power Saving Mode</string>
+    <string name="easytier_pref_power_saving_summary">Stops background hole punching and slows route and heartbeat timers. Idle battery use drops noticeably; connecting to a new peer may take 1–2 seconds longer.</string>
     <string name="easytier_pref_bypass_local_lan_title">Keep Local LAN Direct</string>
     <string name="easytier_pref_bypass_local_lan_summary">Traffic to the Wi-Fi or Ethernet subnet of this device stays direct. Disable only if you intentionally want local LAN traffic to use the mesh.</string>
     <string name="easytier_pref_extra_routes_title">Extra EasyTier Routes</string>

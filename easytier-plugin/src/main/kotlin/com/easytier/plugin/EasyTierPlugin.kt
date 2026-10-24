@@ -218,7 +218,10 @@ class EasyTierPlugin(private val context: Context) {
                 val file = statusSnapshotFile(context)
                 if (!file.exists()) return null
                 val age = System.currentTimeMillis() - file.lastModified()
-                if (age > STATUS_SNAPSHOT_TTL_MS) return null
+                val ttl = StatusWriterPolicy.snapshotTtlMs(
+                    EasyTierSettingsManager.isPowerSaving(context)
+                )
+                if (age > ttl) return null
                 file.readText()
             } catch (e: Throwable) {
                 log("W", "Failed to read status snapshot", e)
@@ -236,6 +239,70 @@ class EasyTierPlugin(private val context: Context) {
                 statusSnapshotFile(context).delete()
             } catch (e: Throwable) {
                 // ignore
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Settings-screen watch marker (cross-process)
+        // ------------------------------------------------------------------
+
+        /**
+         * The settings screen runs in the main process while the status writer
+         * runs in the VPN process, so "somebody is looking" is expressed as a
+         * short-lived marker file instead of an in-process flag.
+         */
+        private const val STATUS_WATCH_FILE = "easytier_status_watch"
+
+        private fun statusWatchFile(context: Context): File =
+            File(context.applicationContext.filesDir, STATUS_WATCH_FILE)
+
+        /** Mark the settings screen as visible (called from onResume). */
+        @JvmStatic
+        fun markStatusWatch(context: Context) {
+            try {
+                statusWatchFile(context).writeText("1")
+            } catch (e: Throwable) {
+                log("W", "EasyTier: failed to write status watch marker", e)
+            }
+        }
+
+        /**
+         * Refresh the marker at most once a minute.  Called from the status
+         * poller so a long-running screen keeps the fast cadence without
+         * writing a file every two seconds.
+         */
+        @JvmStatic
+        fun refreshStatusWatch(context: Context) {
+            try {
+                val file = statusWatchFile(context)
+                val now = System.currentTimeMillis()
+                if (!file.exists() || now - file.lastModified() > 60_000L) {
+                    file.writeText("1")
+                }
+            } catch (e: Throwable) {
+                log("W", "EasyTier: failed to refresh status watch marker", e)
+            }
+        }
+
+        /** Remove the marker when the settings screen goes to the background. */
+        @JvmStatic
+        fun clearStatusWatch(context: Context) {
+            try {
+                statusWatchFile(context).delete()
+            } catch (e: Throwable) {
+                // ignore
+            }
+        }
+
+        /** Whether a settings screen refreshed the marker recently. */
+        @JvmStatic
+        fun isStatusWatchActive(context: Context): Boolean {
+            return try {
+                val file = statusWatchFile(context)
+                file.exists() &&
+                    System.currentTimeMillis() - file.lastModified() < StatusWriterPolicy.WATCH_TTL_MS
+            } catch (e: Throwable) {
+                false
             }
         }
 

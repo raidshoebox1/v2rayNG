@@ -90,6 +90,8 @@
     <!-- 省电 -->
     <string name="easytier_pref_pause_on_screen_off_title">息屏暂停</string>
     <string name="easytier_pref_pause_on_screen_off_summary">屏幕关闭时停止 EasyTier 组网以大幅降低待机耗电。屏幕开启时自动恢复组网。VPN 连接不受影响。</string>
+    <string name="easytier_pref_power_saving_title">省电模式</string>
+    <string name="easytier_pref_power_saving_summary">空闲时不主动打洞，并降低路由与心跳频率。待机耗电明显下降；首次连接新节点可能多等 1–2 秒。</string>
     <string name="easytier_pref_bypass_local_lan_title">本机局域网直连</string>
     <string name="easytier_pref_bypass_local_lan_summary">访问本机 Wi-Fi 或以太网子网的流量保持直连。仅在确实希望局域网流量走 EasyTier 时才关闭。</string>
     <string name="easytier_pref_extra_routes_title">额外经 EasyTier 路由的网段</string>
