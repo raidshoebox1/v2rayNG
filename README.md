@@ -120,6 +120,16 @@ Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); they
 are also persisted to `easytier_last_routes.json` so the VPN interface can be
 built with a usable routing baseline before EasyTier starts.
 
+### HEV TUN performance
+
+The bundled `hev-socks5-tunnel` 2.19 enables TCP/UDP segmentation offload and
+jumbo segments by default. On Android the tun is consumed by local sockets, so
+jumbo/GSO delivery can cause retransmissions and a large throughput regression
+(for example stuttering Twitter video). v2rayNG explicitly disables
+`tso`, `uso` and `jumbo` in the HEV config, matching the pre-2.19 behaviour.
+If a device still has low throughput with HEV TUN, switch v2rayNG to the Xray
+TUN implementation (disable HEV TUN) while keeping EasyTier enabled.
+
 ### Remote LANs and KDE Connect
 
 - Add each remote site subnet (for example `192.168.31.0/24`,
