@@ -13,4 +13,6 @@
     <string name="easytier_warning_broad_mesh_cidr">Một peer quảng bá mạng lớn %1$s; nên dùng proxy_networks /24 cho từng site để tránh định tuyến mesh mơ hồ.</string>
     <string name="easytier_warning_per_app_proxy">Đang bật proxy theo ứng dụng; ứng dụng bỏ qua VPN không thể dùng tuyến EasyTier. Hãy kiểm tra danh sách bỏ qua của VPN.</string>
     <string name="easytier_peer_proxy_cidrs">proxy: %1$s</string>
+    <string name="easytier_pref_power_saving_title">Chế độ tiết kiệm pin</string>
+    <string name="easytier_pref_power_saving_summary">Không chủ động đục lỗ khi rảnh và giảm tần suất đồng bộ tuyến và heartbeat. Mức tiêu hao khi chờ giảm rõ rệt; lần kết nối đầu tới peer mới có thể chậm thêm 1–2 giây.</string>
 </resources>

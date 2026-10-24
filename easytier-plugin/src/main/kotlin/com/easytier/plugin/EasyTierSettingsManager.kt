@@ -66,7 +66,7 @@ object EasyTierSettingsManager {
     private val SOCKS5_PORT_RANGE = 1024..65535
 
     /** Schema version for backup/restore format. Increment when the JSON shape changes. */
-    private const val SCHEMA_VERSION = 2
+    private const val SCHEMA_VERSION = 3
 
     /** Backup/restore JSON key for the schema version. */
     private const val KEY_SCHEMA_VERSION = "__version"
@@ -83,6 +83,7 @@ object EasyTierSettingsManager {
     const val KEY_MTU = PREFIX + "mtu"
     const val KEY_LOG_LEVEL = PREFIX + "log_level"
     const val KEY_PAUSE_ON_SCREEN_OFF = PREFIX + "pause_on_screen_off"
+    const val KEY_POWER_SAVING = PREFIX + "power_saving"
     const val KEY_BYPASS_LOCAL_LAN = PREFIX + "bypass_local_lan"
     const val KEY_EXTRA_ROUTES = PREFIX + "extra_routes"
 
@@ -92,6 +93,9 @@ object EasyTierSettingsManager {
 
     /** Default for pause-on-screen-off: disabled (opt-in extreme power saving). */
     const val DEFAULT_PAUSE_ON_SCREEN_OFF = false
+
+    /** Power saving is on by default: it keeps the mesh connected but quiet. */
+    const val DEFAULT_POWER_SAVING = true
 
     /** Keep the device's real LAN direct by default. */
     const val DEFAULT_BYPASS_LOCAL_LAN = true
@@ -156,6 +160,7 @@ object EasyTierSettingsManager {
             addProperty(KEY_MTU, sp.getString(KEY_MTU, null) ?: "")
             addProperty(KEY_LOG_LEVEL, sp.getString(KEY_LOG_LEVEL, DEFAULT_LOG_LEVEL) ?: DEFAULT_LOG_LEVEL)
             addProperty(KEY_PAUSE_ON_SCREEN_OFF, sp.getBoolean(KEY_PAUSE_ON_SCREEN_OFF, DEFAULT_PAUSE_ON_SCREEN_OFF))
+            addProperty(KEY_POWER_SAVING, sp.getBoolean(KEY_POWER_SAVING, DEFAULT_POWER_SAVING))
             addProperty(KEY_BYPASS_LOCAL_LAN, sp.getBoolean(KEY_BYPASS_LOCAL_LAN, DEFAULT_BYPASS_LOCAL_LAN))
             addProperty(KEY_EXTRA_ROUTES, sp.getString(KEY_EXTRA_ROUTES, "") ?: "")
         }
@@ -324,6 +329,9 @@ object EasyTierSettingsManager {
 
     fun isPauseOnScreenOff(context: Context): Boolean = getBoolPref(context, KEY_PAUSE_ON_SCREEN_OFF, DEFAULT_PAUSE_ON_SCREEN_OFF)
 
+    fun isPowerSaving(context: Context): Boolean =
+        getBoolPref(context, KEY_POWER_SAVING, DEFAULT_POWER_SAVING)
+
     fun isBypassLocalLan(context: Context): Boolean =
         getBoolPref(context, KEY_BYPASS_LOCAL_LAN, DEFAULT_BYPASS_LOCAL_LAN)
 
@@ -458,6 +466,11 @@ object EasyTierSettingsManager {
         writeSnapshot(context)
     }
 
+    fun setPowerSaving(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_POWER_SAVING, enabled).commit()
+        writeSnapshot(context)
+    }
+
     fun setPauseOnScreenOff(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_PAUSE_ON_SCREEN_OFF, enabled).commit()
         writeSnapshot(context)
@@ -517,6 +530,7 @@ object EasyTierSettingsManager {
             peers = getPeers(context),
             socks5Port = getSocks5Port(context),
             noTun = true,
+            powerSaving = isPowerSaving(context),
             mtu = getMtu(context),
             logLevel = getLogLevel(context),
         )
@@ -631,6 +645,9 @@ object EasyTierSettingsManager {
         }
         json.get(KEY_PAUSE_ON_SCREEN_OFF)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
             editor.putBoolean(KEY_PAUSE_ON_SCREEN_OFF, it); hasAny = true
+        }
+        json.get(KEY_POWER_SAVING)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
+            editor.putBoolean(KEY_POWER_SAVING, it); hasAny = true
         }
         json.get(KEY_BYPASS_LOCAL_LAN)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
             editor.putBoolean(KEY_BYPASS_LOCAL_LAN, it); hasAny = true

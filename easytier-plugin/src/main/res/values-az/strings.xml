@@ -13,4 +13,6 @@
     <string name="easytier_warning_broad_mesh_cidr">Bir peer geniş %1$s şəbəkəsini elan edir; mesh marşrutlaşdırmasında qeyri-müəyyənliyin qarşısını almaq üçün hər site üçün /24 proxy_networks istifadə edin.</string>
     <string name="easytier_warning_per_app_proxy">Tətbiq üzrə proxy aktivdir; VPN-i yan keçən tətbiqlər EasyTier marşrutlarından istifadə edə bilməz. VPN-in yan keçmə siyahısını yoxlayın.</string>
     <string name="easytier_peer_proxy_cidrs">proxy: %1$s</string>
+    <string name="easytier_pref_power_saving_title">Enerji qənaət rejimi</string>
+    <string name="easytier_pref_power_saving_summary">Boşdaykən NAT deşməsi etmir və marşrut/heartbeat sinxronizasiyasını yavaşladır. Gözləmə rejimində enerji sərfiyyatı nəzərəçarpan dərəcədə azalır; yeni peer-ə ilk qoşulma 1–2 saniyə uzun çəkə bilər.</string>
 </resources>

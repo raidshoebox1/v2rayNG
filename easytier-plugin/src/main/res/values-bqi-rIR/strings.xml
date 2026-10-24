@@ -13,4 +13,6 @@
     <string name="easytier_warning_broad_mesh_cidr">یک peer شبکه بزرگ %1$s را اعلام می‌کند؛ برای جلوگیری از ابهام مسیریابی mesh از proxy_networks /24 برای هر سایت استفاده کن.</string>
     <string name="easytier_warning_per_app_proxy">پروکسی هر برنامه فعاله؛ برنامه‌هایی که VPN را دور می‌زنن نمی‌تونن از مسیرهای EasyTier استفاده کنن. لیست عبور VPN را بررسی کن.</string>
     <string name="easytier_peer_proxy_cidrs">پروکسی: %1$s</string>
+    <string name="easytier_pref_power_saving_title">حالت صرفه‌جویی انرژی</string>
+    <string name="easytier_pref_power_saving_summary">در حالت بی‌کاری سوراخ‌کاری NAT انجام نمی‌شه و همگام‌سازی مسیر و heartbeat کندتر می‌شه. مصرف باتری در حالت آماده‌به‌کار محسوس کم می‌شه؛ اولین اتصال به همتای جدید شاید ۱–۲ ثانیه بیشتر طول بکشه.</string>
 </resources>

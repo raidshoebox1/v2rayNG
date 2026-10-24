@@ -46,6 +46,31 @@ class EasyTierConfigTest {
     }
 
     @Test
+    fun `power saving writes the flag set`() {
+        val toml = EasyTierConfig(networkName = "mesh", powerSaving = true).toToml()
+
+        assertTrue(toml.contains("lazy_p2p = true"))
+        assertTrue(toml.contains("disable_upnp = true"))
+        assertTrue(toml.contains("mobile_power_saving = true"))
+    }
+
+    @Test
+    fun `disabling power saving writes explicit false flags`() {
+        val toml = EasyTierConfig(networkName = "mesh", powerSaving = false).toToml()
+
+        assertTrue(toml.contains("lazy_p2p = false"))
+        assertTrue(toml.contains("disable_upnp = false"))
+        assertTrue(toml.contains("mobile_power_saving = false"))
+    }
+
+    @Test
+    fun `power saving is on by default`() {
+        val toml = EasyTierConfig(networkName = "mesh").toToml()
+
+        assertTrue(toml.contains("mobile_power_saving = true"))
+    }
+
+    @Test
     fun `no_tun is always written for v2rayng coexistence`() {
         val toml = EasyTierConfig(networkName = "mesh", noTun = true).toToml()
 

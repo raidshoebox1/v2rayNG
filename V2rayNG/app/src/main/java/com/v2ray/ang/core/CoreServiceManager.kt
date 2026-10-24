@@ -33,6 +33,7 @@ import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import com.easytier.plugin.EasyTierPlugin
 import com.easytier.plugin.EasyTierSettingsManager
+import com.easytier.plugin.StatusWriterPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -388,18 +389,53 @@ object CoreServiceManager {
                 } catch (e: Throwable) {
                     EasyTierPlugin.log("W", "EasyTier: status writer failed (non-fatal)", e)
                 }
-                try {
-                    Thread.sleep(EasyTierPlugin.STATUS_WRITER_INTERVAL_MS)
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                }
+                sleepUntilNextStatusWrite(appContext)
             }
         }.apply {
             name = "EasyTierStatusWriter"
             isDaemon = true
             start()
         }
+    }
+
+    /**
+     * Sleep for the current status interval.
+     *
+     * The sleep is split into one-second slices so a screen on/off transition
+     * or a settings screen opening takes effect within ~1 second instead of
+     * waiting for the full delay.  The interval itself follows
+     * [StatusWriterPolicy]: the snapshot is only read by the settings screen,
+     * so there is no reason to pay a JNI call and a file write every 3s while
+     * nobody is looking.
+     */
+    private fun sleepUntilNextStatusWrite(context: Context) {
+        // Reading the settings snapshot is a disk read.  The switch can only be
+        // toggled while the settings screen is open (fast cadence anyway), so
+        // evaluate it once per sleep and only poll the cheap screen/marker
+        // state inside the loop.
+        val powerSaving = EasyTierSettingsManager.isPowerSaving(context)
+        val interval = currentStatusIntervalMs(context, powerSaving)
+        var elapsed = 0L
+        while (statusWriterRunning && elapsed < interval) {
+            val chunk = minOf(1_000L, interval - elapsed)
+            try {
+                Thread.sleep(chunk)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
+            }
+            elapsed += chunk
+            if (currentStatusIntervalMs(context, powerSaving) != interval) return
+        }
+    }
+
+    private fun currentStatusIntervalMs(context: Context, powerSaving: Boolean): Long {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return StatusWriterPolicy.intervalMs(
+            powerSaving = powerSaving,
+            screenOn = powerManager?.isInteractive == true,
+            watching = EasyTierPlugin.isStatusWatchActive(context)
+        )
     }
 
     /**

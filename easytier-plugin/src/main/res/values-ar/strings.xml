@@ -13,4 +13,6 @@
     <string name="easytier_warning_broad_mesh_cidr">يعلن peer عن شبكة واسعة %1$s؛ يفضل استخدام proxy_networks /24 لكل موقع لتجنب غموض توجيه mesh.</string>
     <string name="easytier_warning_per_app_proxy">تم تمكين وكيل التطبيقات؛ التطبيقات التي تتجاوز VPN لا يمكنها استخدام مسارات EasyTier. تحقق من قائمة التجاوز في VPN.</string>
     <string name="easytier_peer_proxy_cidrs">الوكيل: %1$s</string>
+    <string name="easytier_pref_power_saving_title">وضع توفير الطاقة</string>
+    <string name="easytier_pref_power_saving_summary">يمنع اختراق NAT في الخلفية ويبطئ مزامنة المسارات ونبضات القلب. ينخفض استهلاك البطارية في وضع الخمول بوضوح؛ قد يستغرق أول اتصال بنظير جديد ثانية إلى ثانيتين إضافيتين.</string>
 </resources>
