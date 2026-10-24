@@ -77,6 +77,17 @@ class TProxyService(
                 appendLine("  ipv6: '${vpnConfig.ipv6Client}'")
             }
 
+            // HEV 2.19 enables TSO, USO and jumbo segments by default.  On
+            // Android the tun is delivered to local sockets, so jumbo/GSO
+            // segments can cause heavy retransmission and a large throughput
+            // regression (for example stuttering Twitter video).  Keep the
+            // pre-2.19 behaviour; these can be made opt-in if a device
+            // benefits from them.
+            appendLine("  offload:")
+            appendLine("    tso: false")
+            appendLine("    uso: false")
+            appendLine("    jumbo: false")
+
             appendLine("socks5:")
             appendLine("  port: ${socksPort}")
             appendLine("  address: ${AppConfig.LOOPBACK}")
