@@ -26,7 +26,7 @@ class EasyTierRoutingRulesTest {
             additions.map { it.outboundTag }
         )
 
-        EasyTierRoutingRules.insertAfterDnsOut(rules, additions)
+        EasyTierRoutingRules.insertAfterDnsRules(rules, additions)
         assertEquals(
             listOf("dns-out", AppConfig.TAG_DIRECT, EasyTierPlugin.OUTBOUND_TAG, "proxy"),
             rules.map { it.outboundTag }
@@ -41,7 +41,7 @@ class EasyTierRoutingRulesTest {
         )
         val rules = mutableListOf(rule("proxy"))
 
-        EasyTierRoutingRules.insertAfterDnsOut(
+        EasyTierRoutingRules.insertAfterDnsRules(
             rules,
             EasyTierRoutingRules.buildMissing(rules, plan)
         )
@@ -83,5 +83,47 @@ class EasyTierRoutingRulesTest {
         val additions = EasyTierRoutingRules.buildMissing(emptyList(), plan)
 
         assertEquals(listOf(EasyTierPlugin.OUTBOUND_TAG), additions.map { it.outboundTag })
+    }
+
+    @Test
+    fun `bypass LAN mode skips the direct LAN rule`() {
+        val plan = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("10.144.144.0/24")
+        )
+        val additions = EasyTierRoutingRules.buildMissing(
+            emptyList(),
+            plan,
+            includeLocalLanDirect = false
+        )
+
+        assertEquals(listOf(EasyTierPlugin.OUTBOUND_TAG), additions.map { it.outboundTag })
+    }
+
+    @Test
+    fun `rules are inserted after an explicit port 53 DNS rule`() {
+        val plan = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("10.144.144.0/24")
+        )
+        val rules = mutableListOf(
+            V2rayConfig.RoutingBean.RulesBean(port = "53", outboundTag = "dns-proxy"),
+            rule("proxy")
+        )
+
+        EasyTierRoutingRules.insertAfterDnsRules(
+            rules,
+            EasyTierRoutingRules.buildMissing(rules, plan)
+        )
+
+        assertEquals(
+            listOf(
+                "dns-proxy",
+                AppConfig.TAG_DIRECT,
+                EasyTierPlugin.OUTBOUND_TAG,
+                "proxy"
+            ),
+            rules.map { it.outboundTag }
+        )
     }
 }

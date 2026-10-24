@@ -109,6 +109,13 @@ devices and broke local service discovery. Peers that proxy a remote LAN can
 still be reached by adding that subnet under **Extra EasyTier Routes**, or
 automatically through discovered `proxy_cidrs`.
 
+Only private/special-use local subnets are eligible for the direct rule. The
+Xray direct rule is added only in full-tunnel mode, where the VPN actually
+captures LAN traffic; in bypass-LAN mode the VpnService route table already
+leaves the LAN direct. Rules are inserted after any DNS rule (`dns-out` or an
+explicit port 53 rule) so local DNS is not diverted before the user's DNS
+configuration runs.
+
 Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); they
 are also persisted to `easytier_last_routes.json` so the VPN interface can be
 built with a usable routing baseline before EasyTier starts.

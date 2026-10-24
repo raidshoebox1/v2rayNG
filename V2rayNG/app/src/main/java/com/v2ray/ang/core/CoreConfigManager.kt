@@ -1395,10 +1395,16 @@ object CoreConfigManager {
             )
         }
 
-        // Insert AFTER any dns-out rule so DNS hijacking (port 53) takes priority.
-        // The direct LAN rule must come before the EasyTier rule.
-        val additions = EasyTierRoutingRules.buildMissing(v2rayConfig.routing.rules, plan)
-        EasyTierRoutingRules.insertAfterDnsOut(v2rayConfig.routing.rules, additions)
+        // Insert AFTER any DNS rule so DNS hijacking (port 53) takes priority.
+        // The direct LAN rule is only needed in full-tunnel mode; in bypass-LAN
+        // mode the VpnService route table already excludes the local LAN.
+        val includeDirectLan = !SettingsManager.routingRulesetsBypassLan()
+        val additions = EasyTierRoutingRules.buildMissing(
+            v2rayConfig.routing.rules,
+            plan,
+            includeLocalLanDirect = includeDirectLan
+        )
+        EasyTierRoutingRules.insertAfterDnsRules(v2rayConfig.routing.rules, additions)
         additions.firstOrNull { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }?.let {
             LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule for CIDRs: ${it.ip}")
         }
@@ -1447,24 +1453,48 @@ object CoreConfigManager {
             val rules = routing.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
                 ?: JsonArray().also { routing.add("rules", it) }
 
+            // The direct LAN rule is only needed in full-tunnel mode.  In
+            // bypass-LAN mode the VpnService route table already keeps the LAN
+            // direct, and an extra rule could steal a LAN DNS query from the
+            // user's DNS rule.
+            val includeDirectLan = !SettingsManager.routingRulesetsBypassLan()
+            if (includeDirectLan && plan.localLanCidrs.isNotEmpty() &&
+                outbounds.none { outbound ->
+                    outbound.isJsonObject &&
+                        outbound.asJsonObject.get("tag")?.asString == AppConfig.TAG_DIRECT
+                }
+            ) {
+                // A custom config may not define the `direct` outbound that the
+                // injected rule references.  Add a freedom outbound so the rule
+                // is valid.
+                outbounds.add(com.google.gson.JsonObject().apply {
+                    addProperty("tag", AppConfig.TAG_DIRECT)
+                    addProperty("protocol", "freedom")
+                    add("settings", com.google.gson.JsonObject())
+                })
+            }
+
             var hasEasyTierRule = false
             var hasDirectLanRule = false
-            var dnsOutIndex = -1
+            var dnsRuleIndex = -1
             for (i in 0 until rules.size()) {
                 val rule = rules[i]?.takeIf { it.isJsonObject }?.asJsonObject ?: continue
-                when (rule.get("outboundTag")?.asString) {
+                val tag = rule.get("outboundTag")?.asString
+                when (tag) {
                     EasyTierPlugin.OUTBOUND_TAG -> hasEasyTierRule = true
-                    "dns-out" -> dnsOutIndex = i
                     AppConfig.TAG_DIRECT -> {
                         if (jsonRuleIps(rule) == plan.localLanCidrs.toSet()) {
                             hasDirectLanRule = true
                         }
                     }
                 }
+                if (tag == "dns-out" || jsonRuleHandlesDnsPort(rule)) {
+                    dnsRuleIndex = i
+                }
             }
 
             val toInsert = mutableListOf<com.google.gson.JsonObject>()
-            if (plan.localLanCidrs.isNotEmpty() && !hasDirectLanRule) {
+            if (includeDirectLan && plan.localLanCidrs.isNotEmpty() && !hasDirectLanRule) {
                 toInsert.add(com.google.gson.JsonObject().apply {
                     addProperty("type", "field")
                     add("ip", Gson().toJsonTree(plan.localLanCidrs))
@@ -1480,7 +1510,7 @@ object CoreConfigManager {
             }
             if (toInsert.isEmpty()) return JsonUtil.toJsonPretty(obj) ?: json
 
-            val insertAt = dnsOutIndex + 1
+            val insertAt = dnsRuleIndex + 1
             val newRules = com.google.gson.JsonArray()
             for (i in 0..rules.size()) {
                 if (i == insertAt) {
@@ -1506,6 +1536,14 @@ object CoreConfigManager {
         return array.mapNotNull { element ->
             element.takeIf { it.isJsonPrimitive }?.asString
         }.toSet()
+    }
+
+    /** Whether a custom-config routing rule explicitly handles DNS port 53. */
+    private fun jsonRuleHandlesDnsPort(rule: JsonObject): Boolean {
+        val port = rule.get("port")?.takeIf { it.isJsonPrimitive }?.asString ?: return false
+        return port.split(',', ' ', '/')
+            .map { it.trim() }
+            .any { it == "53" || it == "53-53" }
     }
 
     //endregion
