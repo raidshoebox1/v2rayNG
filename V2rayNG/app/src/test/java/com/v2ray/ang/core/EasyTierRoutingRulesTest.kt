@@ -126,4 +126,105 @@ class EasyTierRoutingRulesTest {
             rules.map { it.outboundTag }
         )
     }
+
+    @Test
+    fun `direct rule can be injected without an easytier listener`() {
+        val plan = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("192.168.1.0/24"),
+            vpnRoutes = listOf("192.168.1.0/24"),
+            vpnRoutesOverlapLocalLan = true
+        )
+
+        val additions = EasyTierRoutingRules.buildMissing(
+            emptyList(),
+            plan,
+            includeLocalLanDirect = true,
+            includeEasyTierRule = false
+        )
+
+        assertEquals(listOf(AppConfig.TAG_DIRECT), additions.map { it.outboundTag })
+    }
+
+    @Test
+    fun `overlapping lan keeps the direct rule in bypass mode`() {
+        val plan = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("10.144.144.0/24"),
+            vpnRoutes = listOf("192.168.1.0/24", "10.144.144.0/24"),
+            vpnRoutesOverlapLocalLan = true
+        )
+        val rules = mutableListOf(rule("dns-out"), rule("proxy"))
+
+        EasyTierRoutingRules.insertAfterDnsRules(
+            rules,
+            EasyTierRoutingRules.buildMissing(rules, plan, includeLocalLanDirect = true)
+        )
+
+        assertEquals(
+            listOf("dns-out", AppConfig.TAG_DIRECT, EasyTierPlugin.OUTBOUND_TAG, "proxy"),
+            rules.map { it.outboundTag }
+        )
+    }
+
+    @Test
+    fun `full tunnel mode needs the direct rule`() {
+        val plan = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("10.144.144.0/24")
+        )
+
+        assertTrue(
+            EasyTierRoutingRules.needsDirectLanRule(
+                vpnMode = true,
+                bypassLan = false,
+                plan = plan
+            )
+        )
+    }
+
+    @Test
+    fun `bypass mode needs the direct rule only when a route overlaps the lan`() {
+        val overlapping = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("10.144.144.0/24"),
+            vpnRoutes = listOf("192.168.1.0/24", "10.144.144.0/24"),
+            vpnRoutesOverlapLocalLan = true
+        )
+        val nonOverlapping = overlapping.copy(
+            vpnRoutes = listOf("10.144.144.0/24"),
+            vpnRoutesOverlapLocalLan = false
+        )
+
+        assertTrue(
+            EasyTierRoutingRules.needsDirectLanRule(
+                vpnMode = true,
+                bypassLan = true,
+                plan = overlapping
+            )
+        )
+        assertTrue(
+            !EasyTierRoutingRules.needsDirectLanRule(
+                vpnMode = true,
+                bypassLan = true,
+                plan = nonOverlapping
+            )
+        )
+    }
+
+    @Test
+    fun `proxy only mode never needs the direct rule`() {
+        val plan = EasyTierRoutePlan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            easyTierCidrs = listOf("10.144.144.0/24")
+        )
+
+        assertTrue(
+            !EasyTierRoutingRules.needsDirectLanRule(
+                vpnMode = false,
+                bypassLan = false,
+                plan = plan
+            )
+        )
+    }
 }

@@ -34,6 +34,20 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @SuppressLint("VpnServicePolicy")
 class CoreVpnService : VpnService(), ServiceControl {
+    companion object {
+        /**
+         * CIDRs captured by the most recently established VPN interface.
+         *
+         * Android cannot add routes to an established VpnService interface, so
+         * [CoreServiceManager] only uses this for diagnostics: a mesh CIDR
+         * discovered later is applied to the Xray rules, but can only enter the
+         * tunnel after the VPN is restarted.
+         */
+        @Volatile
+        var lastAppliedVpnRoutes: Set<String> = emptySet()
+            private set
+    }
+
     private lateinit var mInterface: ParcelFileDescriptor
     private var isRunning = false
     private var tun2SocksService: Tun2SocksControl? = null
@@ -205,6 +219,10 @@ class CoreVpnService : VpnService(), ServiceControl {
         val vpnConfig = SettingsManager.getCurrentVpnInterfaceAddressConfig()
         val bypassLan = SettingsManager.routingRulesetsBypassLan()
 
+        // Reset the diagnostic route set for every new interface; a failed
+        // EasyTier setup must not leave a previous session's routes visible.
+        lastAppliedVpnRoutes = emptySet()
+
         // Configure IPv4 settings
         builder.setMtu(SettingsManager.getVpnMtu())
         builder.addAddress(vpnConfig.ipv4Client, 30)
@@ -220,6 +238,13 @@ class CoreVpnService : VpnService(), ServiceControl {
             // add the CIDRs that actually belong to EasyTier. Never add 10/8, 172.16/12
             // or 192.168/16 as a whole: that would capture the device's real LAN and
             // break LocalSend / KDE Connect.
+            //
+            // The route table is frozen once Builder.establish() returns, so the
+            // plan's vpnRoutes deliberately ignores the currently connected LAN.
+            // If an EasyTier/extra route overlaps the Wi-Fi subnet, the subnet is
+            // kept in the table and Xray sends LAN destinations direct while the
+            // device is still on that LAN; after a handover to cellular the same
+            // route is already present and EasyTier can take over.
             try {
                 val etConfig = EasyTierSettingsManager.getEasyTierConfig(this)
                 if (etConfig != null && etConfig.enabled) {
@@ -232,6 +257,8 @@ class CoreVpnService : VpnService(), ServiceControl {
                         lastKnownCidrs = EasyTierPlugin.getLastKnownMeshCidrs(this),
                         bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(this)
                     )
+                    var addedRoutes = 0
+                    val appliedRoutes = LinkedHashSet<String>()
                     plan.vpnRoutes.forEach { cidr ->
                         if (cidr.contains(":") &&
                             MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) != true
@@ -241,9 +268,18 @@ class CoreVpnService : VpnService(), ServiceControl {
                         val parts = cidr.split('/')
                         if (parts.size == 2) {
                             builder.addRoute(parts[0], parts[1].toInt())
-                            LogUtil.d(AppConfig.TAG, "EasyTier: added VPN route for mesh CIDR: $cidr")
+                            appliedRoutes.add(cidr)
+                            addedRoutes++
+                            LogUtil.d(AppConfig.TAG, "EasyTier: added VPN route for EasyTier CIDR: $cidr")
                         }
                     }
+                    lastAppliedVpnRoutes = appliedRoutes
+                    LogUtil.i(
+                        AppConfig.TAG,
+                        "EasyTier: VPN route table built with $addedRoutes route(s), " +
+                            "lanOverlap=${plan.vpnRoutesOverlapLocalLan}, " +
+                            "bypassLan=$bypassLan"
+                    )
                     if (plan.conflicts.isNotEmpty()) {
                         LogUtil.i(
                             AppConfig.TAG,
