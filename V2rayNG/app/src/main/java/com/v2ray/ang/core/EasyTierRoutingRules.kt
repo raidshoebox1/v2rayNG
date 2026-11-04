@@ -12,27 +12,49 @@ import com.v2ray.ang.dto.V2rayConfig
  * after any DNS rule.  Extracted from [CoreConfigManager] so the order can be
  * covered by a JVM test.
  *
- * In bypass-LAN mode the VpnService route table already excludes private
- * subnets, so the direct LAN rule is unnecessary.  Only full-tunnel mode needs
- * it, and adding it there after DNS prevents a LAN resolver from being sent
- * direct before the user's DNS rule runs.
+ * In bypass-LAN mode the VpnService route table normally excludes private
+ * subnets, so the direct LAN rule is unnecessary.  The exception is a
+ * mesh/extra route that overlaps the connected LAN: the route is kept in the
+ * tunnel table so it survives a handover, and the direct rule keeps that LAN
+ * traffic out of the proxy while the device is still on the LAN.
  */
 internal object EasyTierRoutingRules {
 
     const val DNS_OUT_TAG = "dns-out"
 
     /**
+     * Whether the direct LAN rule is required for [plan].
+     *
+     * The VPN captures LAN traffic in full-tunnel mode, and in bypass-LAN
+     * mode when an EasyTier/extra route overlaps the connected LAN (the route
+     * is kept in the tunnel table so it survives a handover).  Proxy-only and
+     * root modes have no VpnService interface, so they never need this rule.
+     */
+    fun needsDirectLanRule(
+        vpnMode: Boolean,
+        bypassLan: Boolean,
+        plan: EasyTierRoutePlan
+    ): Boolean {
+        if (!vpnMode) return false
+        if (plan.localLanCidrs.isEmpty()) return false
+        return !bypassLan || plan.vpnRoutesOverlapLocalLan
+    }
+
+    /**
      * Build the rules that are not already present.
      *
      * @param includeLocalLanDirect whether the direct LAN rule is needed.
-     *   It is only needed when the VPN captures the local LAN (full tunnel).
+     * @param includeEasyTierRule whether to add the EasyTier rule.  False when
+     *   this process has no verified EasyTier listener; a direct LAN rule may
+     *   still be required for the routes the VpnService captured.
      * @return the direct LAN rule followed by the EasyTier rule, or an empty
      *   list when equivalent rules already exist.
      */
     fun buildMissing(
         rules: List<V2rayConfig.RoutingBean.RulesBean>,
         plan: EasyTierRoutePlan,
-        includeLocalLanDirect: Boolean = true
+        includeLocalLanDirect: Boolean = true,
+        includeEasyTierRule: Boolean = true
     ): List<V2rayConfig.RoutingBean.RulesBean> {
         val additions = mutableListOf<V2rayConfig.RoutingBean.RulesBean>()
 
@@ -51,16 +73,18 @@ internal object EasyTierRoutingRules {
             )
         }
 
-        val easyTierExists = plan.easyTierCidrs.isEmpty() ||
-            rules.any { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }
-        if (!easyTierExists) {
-            additions.add(
-                V2rayConfig.RoutingBean.RulesBean(
-                    type = "field",
-                    ip = ArrayList(plan.easyTierCidrs),
-                    outboundTag = EasyTierPlugin.OUTBOUND_TAG
+        if (includeEasyTierRule) {
+            val easyTierExists = plan.easyTierCidrs.isEmpty() ||
+                rules.any { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }
+            if (!easyTierExists) {
+                additions.add(
+                    V2rayConfig.RoutingBean.RulesBean(
+                        type = "field",
+                        ip = ArrayList(plan.easyTierCidrs),
+                        outboundTag = EasyTierPlugin.OUTBOUND_TAG
+                    )
                 )
-            )
+            }
         }
 
         return additions

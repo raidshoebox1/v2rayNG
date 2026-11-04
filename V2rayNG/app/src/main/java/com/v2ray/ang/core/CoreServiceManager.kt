@@ -26,6 +26,8 @@ import com.v2ray.ang.handler.NotificationManager
 import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.handler.SpeedtestManager
 import com.v2ray.ang.helper.MessageHelper
+import com.v2ray.ang.service.CoreRootService
+import com.v2ray.ang.service.CoreVpnService
 import com.v2ray.ang.service.DialerNativeService
 import com.v2ray.ang.service.DialerWebviewService
 import com.v2ray.ang.service.NetworkMonitor
@@ -37,9 +39,11 @@ import com.easytier.plugin.StatusWriterPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import libv2ray.CoreCallbackHandler
@@ -57,6 +61,30 @@ object CoreServiceManager {
     private var browserDialer: IDialerService? = null
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Owns EasyTier route reconciliation work.  Kept separate from
+     * [connectionTestScope] so a delay measurement cannot cancel a route
+     * refresh, and so [stopCoreLoop] can cancel the single route-sync job.
+     */
+    private val routeSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile
+    private var routeSyncJob: Job? = null
+    @Volatile
+    private var appliedEasyTierCidrs: Set<String> = emptySet()
+    @Volatile
+    private var meshRouteReloadCount = 0
+
+    /**
+     * True once teardown has started.  A handover or config-only restart that
+     * is already in flight must check this before recreating the core.
+     */
+    @Volatile
+    private var stopping = false
+
+    /** A handover arrived while another reload was running; retry once. */
+    @Volatile
+    private var pendingHandover = false
 
     @Volatile
     private var isReloading = false
@@ -168,31 +196,65 @@ object CoreServiceManager {
         mFilter.addAction(Intent.ACTION_USER_PRESENT)
         ContextCompat.registerReceiver(service, mMsgReceive, mFilter, Utils.receiverFlags())
 
+        stopping = false
+        pendingHandover = false
+        meshRouteReloadCount = 0
         currentVpnInterface = vpnInterface
         launchCore(service, vpnInterface)
         startNetworkMonitor(service)
     }
 
     @Throws(Exception::class)
-    private fun launchCore(service: Service, vpnInterface: ParcelFileDescriptor?, isReload: Boolean = false) {
+    private fun launchCore(
+        service: Service,
+        vpnInterface: ParcelFileDescriptor?,
+        isReload: Boolean = false,
+        restartEasyTier: Boolean = true,
+        persistMeshCidrs: Boolean = false
+    ) {
         val guid = MmkvManager.getSelectServer() ?: error("No server selected")
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
 
-        // Stop any lingering EasyTier instance from a previous start that was
-        // not properly cleaned up (e.g. Proxy mode start failure, or stopCoreLoop
-        // not being called before this start). This ensures the native instance
-        // is stopped before starting with updated config, otherwise
-        // runNetworkInstance() would fail with "instance already exists" and the
-        // old instance (with stale settings) would keep running.
-        stopEasyTier(service)
+        if (restartEasyTier) {
+            // Stop any lingering EasyTier instance from a previous start that was
+            // not properly cleaned up (e.g. Proxy mode start failure, or stopCoreLoop
+            // not being called before this start). This ensures the native instance
+            // is stopped before starting with updated config, otherwise
+            // runNetworkInstance() would fail with "instance already exists" and the
+            // old instance (with stale settings) would keep running.
+            //
+            // A handover reaches this path from NetworkMonitor's IO coroutine, so the
+            // snapshot write is off the main thread.  Persist the mesh CIDRs first:
+            // the restarted instance may need many seconds to re-converge, and the
+            // route plan used below must still contain the previous topology.
+            if (persistMeshCidrs && EasyTierPlugin.isSessionActive()) {
+                try {
+                    EasyTierPlugin.writeStatusSnapshot(service)
+                    LogUtil.i(
+                        AppConfig.TAG,
+                        "StartCore-Manager: persisted EasyTier mesh CIDRs before restart (mode=${modeName(service)})"
+                    )
+                } catch (e: Throwable) {
+                    LogUtil.w(
+                        AppConfig.TAG,
+                        "StartCore-Manager: failed to persist EasyTier CIDRs before restart (mode=${modeName(service)})",
+                        e
+                    )
+                }
+            }
+            stopEasyTier(service)
 
-        // Start EasyTier plugin BEFORE building the Xray config so that mesh CIDRs
-        // are available for routing-rule injection.  After starting, poll briefly
-        // for mesh CIDRs to give peers time to converge.
-        startEasyTier(service)
-        pollMeshCidrs()
+            // Start EasyTier plugin BEFORE building the Xray config so that mesh CIDRs
+            // are available for routing-rule injection.  After starting, poll briefly
+            // for mesh CIDRs to give peers time to converge.
+            startEasyTier(service)
+            pollMeshCidrs()
+
+            // A handover is a new topology: give route reconciliation a fresh budget.
+            meshRouteReloadCount = 0
+        }
 
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         LogUtil.d(AppConfig.TAG, result.content)
@@ -261,6 +323,22 @@ object CoreServiceManager {
                 easyTierPausedByScreenOff = true
             }
         }
+
+        // The config builder records exactly which EasyTier CIDRs it injected.
+        // EasyTier may converge after that build; the watcher compares the live
+        // mesh with this set and refreshes only the Xray rules when needed.
+        appliedEasyTierCidrs = CoreConfigManager.lastAppliedEasyTierCidrs
+        LogUtil.d(
+            AppConfig.TAG,
+            "StartCore-Manager: applied EasyTier CIDRs=${appliedEasyTierCidrs.size} " +
+                "sessionActive=${EasyTierPlugin.isSessionActive()} (mode=${modeName(service)})"
+        )
+        if (EasyTierPlugin.isSessionActive()) {
+            scheduleMeshRouteSync(service)
+        } else {
+            routeSyncJob?.cancel()
+            routeSyncJob = null
+        }
     }
 
     /**
@@ -269,6 +347,15 @@ object CoreServiceManager {
      * @return True if the core was stopped successfully, false otherwise.
      */
     fun stopCoreLoop(): Boolean {
+        if (stopping) {
+            LogUtil.d(AppConfig.TAG, "StartCore-Manager: stopCoreLoop already in progress")
+            return true
+        }
+        stopping = true
+        pendingHandover = false
+        routeSyncJob?.cancel()
+        routeSyncJob = null
+        appliedEasyTierCidrs = emptySet()
         connectionTestScope.coroutineContext.cancelChildren()
         val service = getService() ?: return false
 
@@ -281,7 +368,7 @@ object CoreServiceManager {
         easyTierPausedByScreenOff = false
 
         if (isRunning()) {
-            CoroutineScope(Dispatchers.IO).launch {
+            connectionTestScope.launch {
                 try {
                     coreController.stopLoop()
                 } catch (e: Exception) {
@@ -494,11 +581,159 @@ object CoreServiceManager {
         if (networkMonitor != null) return
 
         val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
-        networkMonitor = NetworkMonitor(
+        val monitor = NetworkMonitor(
             connectivity = connectivity,
             onUnderlyingNetworksChanged = { networks -> serviceControl?.get()?.setUnderlyingNetworks(networks) },
-            onHandover = { reloadCore() },
-        ).also { it.register() }
+            onHandover = { changed -> handleHandover(changed) },
+        )
+        networkMonitor = monitor
+        monitor.register()
+    }
+
+    /**
+     * Handles a debounced upstream change.
+     *
+     * Runs on the NetworkMonitor's IO scope and may block.  The monitor
+     * instance is checked before doing any work: a callback from a monitor
+     * that has already been replaced or unregistered must not recreate the
+     * core.  The core must still be running for the same reason.
+     */
+    private fun handleHandover(changed: NetworkMonitor) {
+        if (networkMonitor !== changed) {
+            LogUtil.d(AppConfig.TAG, "StartCore-Manager: ignoring handover from a stale NetworkMonitor")
+            return
+        }
+        if (stopping || !isRunning()) return
+        val service = getService() ?: return
+
+        if (isReloading) {
+            pendingHandover = true
+            LogUtil.i(
+                AppConfig.TAG,
+                "StartCore-Manager: handover during reload queued (mode=${modeName(service)})"
+            )
+            return
+        }
+
+        var attempts = 0
+        do {
+            pendingHandover = false
+            LogUtil.i(
+                AppConfig.TAG,
+                "StartCore-Manager: network handover reload start (mode=${modeName(service)})"
+            )
+            reloadCore(restartEasyTier = true)
+            attempts++
+        } while (pendingHandover && attempts < 2 && !stopping && isRunning())
+    }
+
+    private fun modeName(service: Service): String = when (service) {
+        is CoreVpnService -> "vpn"
+        is CoreRootService -> "root"
+        else -> "proxy-only"
+    }
+
+    /**
+     * Watches for EasyTier CIDRs that appear after the Xray config was built
+     * and refreshes the routing rules with a config-only core reload.
+     *
+     * EasyTier's SOCKS5 listener is verified before this is called, so the
+     * rule may safely point at it.  A config-only reload keeps the native
+     * EasyTier instance running: restarting it on every late route would
+     * break the mesh connection this is trying to repair.
+     */
+    private fun scheduleMeshRouteSync(service: Service) {
+        routeSyncJob?.cancel()
+        routeSyncJob = null
+        if (stopping || !EasyTierPlugin.isSessionActive()) return
+
+        val appContext = service.applicationContext
+        val mode = modeName(service)
+        routeSyncJob = routeSyncScope.launch {
+            val deadline = System.currentTimeMillis() + MeshRouteSync.WATCH_WINDOW_MS
+            while (isActive && isRunning() && !stopping && System.currentTimeMillis() < deadline) {
+                delay(MeshRouteSync.POLL_INTERVAL_MS)
+                if (!isActive || !isRunning() || stopping || isReloading) continue
+
+                val plan = try {
+                    EasyTierPlugin.clearMeshCidrsCache()
+                    CoreConfigManager.buildEasyTierRoutePlan(appContext)
+                } catch (e: Throwable) {
+                    LogUtil.w(
+                        AppConfig.TAG,
+                        "StartCore-Manager: EasyTier route sync plan failed (mode=$mode)",
+                        e
+                    )
+                    null
+                } ?: continue
+
+                val current = plan.easyTierCidrs.toSet()
+                val sessionActive = EasyTierPlugin.isSessionActive()
+                if (!MeshRouteSync.shouldReload(
+                        applied = appliedEasyTierCidrs,
+                        current = current,
+                        reloads = meshRouteReloadCount,
+                        coreRunning = isRunning(),
+                        sessionActive = sessionActive
+                    )
+                ) {
+                    continue
+                }
+
+                val added = MeshRouteSync.addedCidrs(appliedEasyTierCidrs, current)
+                // Persist the full tunnel candidate set, not only the Xray rule
+                // (which subtracts the current LAN).  On the next start the
+                // planner still has the overlapping subnet available.
+                EasyTierSettingsManager.setLastKnownMeshCidrs(appContext, plan.vpnRoutes)
+                meshRouteReloadCount++
+                appliedEasyTierCidrs = appliedEasyTierCidrs + added
+                LogUtil.i(
+                    AppConfig.TAG,
+                    "StartCore-Manager: EasyTier route sync adding ${added.size} CIDR(s) " +
+                        "$added (mode=$mode, attempt=$meshRouteReloadCount)"
+                )
+
+                if (service is CoreVpnService && SettingsManager.routingRulesetsBypassLan()) {
+                    val ipv6Enabled =
+                        MmkvManager.decodeSettingsBool(AppConfig.PREF_IPV6_ENABLED) == true
+                    val missing = added.filter { cidr ->
+                        (!cidr.contains(":") || ipv6Enabled) &&
+                            cidr !in CoreVpnService.lastAppliedVpnRoutes
+                    }
+                    if (missing.isNotEmpty()) {
+                        LogUtil.w(
+                            AppConfig.TAG,
+                            "StartCore-Manager: new EasyTier CIDRs are not in the current VpnService route " +
+                                "table: $missing; restart the VPN or add them as Extra EasyTier Routes"
+                        )
+                    }
+                }
+
+                if (!reloadCore(restartEasyTier = false)) {
+                    LogUtil.w(
+                        AppConfig.TAG,
+                        "StartCore-Manager: EasyTier route sync reload failed (mode=$mode)"
+                    )
+                } else if (pendingHandover && !stopping && isRunning()) {
+                    // A handover arrived while this config-only reload was in
+                    // flight and no handover loop was running.  Run it now;
+                    // the mesh connections belong to the old network.
+                    LogUtil.i(
+                        AppConfig.TAG,
+                        "StartCore-Manager: replaying handover queued during route sync (mode=$mode)"
+                    )
+                    networkMonitor?.let { handleHandover(it) }
+                }
+                // The config-only reload schedules a fresh watcher with the
+                // updated applied set; this instance is done.
+                return@launch
+            }
+            LogUtil.d(
+                AppConfig.TAG,
+                "StartCore-Manager: EasyTier route sync window finished (mode=$mode, " +
+                    "reloads=$meshRouteReloadCount)"
+            )
+        }
     }
 
     /**
@@ -508,10 +743,13 @@ object CoreServiceManager {
      * The config is rebuilt on purpose, outbound server domains are resolved while building it and
      * an address resolved on a network that is gone can be unusable on the new one.
      *
+     * @param restartEasyTier true for a handover (the peer connections belong
+     *   to the old network and must be rebuilt); false for a config-only
+     *   route refresh, which must keep the verified EasyTier instance.
      * @return True if the core is running again.
      */
-    private fun reloadCore(): Boolean {
-        if (isReloading) return false
+    private fun reloadCore(restartEasyTier: Boolean = true): Boolean {
+        if (isReloading || stopping) return false
         val service = getService() ?: return false
         if (!isRunning()) return false
 
@@ -519,18 +757,51 @@ object CoreServiceManager {
             val tunFd = currentVpnInterface
 
             isReloading = true
+            if (restartEasyTier) {
+                routeSyncJob?.cancel()
+                routeSyncJob = null
+            }
             connectionTestScope.coroutineContext.cancelChildren()
-            LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload start...")
+            LogUtil.i(
+                AppConfig.TAG,
+                "StartCore-Manager: Core reload start (mode=${modeName(service)}, " +
+                    "restartEasyTier=$restartEasyTier)"
+            )
 
             coreController.stopLoop()
-            launchCore(service, tunFd, isReload = true)
+            if (stopping) {
+                LogUtil.i(
+                    AppConfig.TAG,
+                    "StartCore-Manager: teardown started during reload; not restarting core " +
+                        "(mode=${modeName(service)})"
+                )
+                return false
+            }
+            launchCore(
+                service,
+                tunFd,
+                isReload = true,
+                restartEasyTier = restartEasyTier,
+                persistMeshCidrs = restartEasyTier
+            )
 
-            LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core reload finished")
+            LogUtil.i(
+                AppConfig.TAG,
+                "StartCore-Manager: Core reload finished (mode=${modeName(service)}, " +
+                    "restartEasyTier=$restartEasyTier)"
+            )
             true
         } catch (e: Exception) {
             val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
-            LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to reload core: $message", e)
-            MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
+            LogUtil.e(
+                AppConfig.TAG,
+                "StartCore-Manager: Failed to reload core " +
+                    "(mode=${modeName(service)}, phase=reload, restartEasyTier=$restartEasyTier): $message",
+                e
+            )
+            if (!stopping) {
+                MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
+            }
             false
         } finally {
             isReloading = false
@@ -781,6 +1052,8 @@ object CoreServiceManager {
                         if (shouldStop) {
                             EasyTierPlugin.log("I", "EasyTier: pausing mesh networking on screen off")
                             stopEasyTier(serviceControl.getService())
+                            routeSyncJob?.cancel()
+                            routeSyncJob = null
                         }
                     }
                 }
@@ -828,6 +1101,15 @@ object CoreServiceManager {
                                 if (screenTurnedOff) {
                                     EasyTierPlugin.log("I", "EasyTier: screen turned off during resume, re-pausing")
                                     stopEasyTier(svc)
+                                    routeSyncJob?.cancel()
+                                    routeSyncJob = null
+                                } else {
+                                    // EasyTier may have re-converged on a new
+                                    // topology while the screen was off; the
+                                    // Xray rules were built before the pause.
+                                    appliedEasyTierCidrs = CoreConfigManager.lastAppliedEasyTierCidrs
+                                    meshRouteReloadCount = 0
+                                    scheduleMeshRouteSync(svc)
                                 }
                             } finally {
                                 synchronized(easyTierPauseLock) {

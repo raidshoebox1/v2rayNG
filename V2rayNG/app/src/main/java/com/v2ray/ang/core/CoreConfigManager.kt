@@ -32,6 +32,18 @@ object CoreConfigManager {
     private var initConfigCache: String? = null
     private var initConfigCacheWithTun: String? = null
 
+    /**
+     * EasyTier CIDRs that the most recently built Xray config injected, or an
+     * empty set when the plugin is disabled or has no verified listener.
+     *
+     * Written by [injectEasyTier] / [injectEasyTierIntoCustomConfig] in this
+     * process.  [CoreServiceManager] reads it to compare the running rules
+     * with the live mesh without another JNI query on the service thread.
+     */
+    @Volatile
+    internal var lastAppliedEasyTierCidrs: Set<String> = emptySet()
+        private set
+
     //region get config function
 
     /**
@@ -1341,8 +1353,12 @@ object CoreConfigManager {
      * must also consider the persisted last-known CIDRs.  Keeping the
      * planning rules in one place ensures the VPN route table and the Xray
      * routing rules never disagree.
+     *
+     * Internal rather than private so [CoreServiceManager] can compare the
+     * plan applied to the running core with the live mesh before refreshing
+     * routing rules after a handover.
      */
-    private fun buildEasyTierRoutePlan(context: Context): EasyTierRoutePlan? {
+    internal fun buildEasyTierRoutePlan(context: Context): EasyTierRoutePlan? {
         val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return null
         if (!etConfig.enabled) return null
 
@@ -1366,6 +1382,22 @@ object CoreConfigManager {
     }
 
     /**
+     * Whether the running mode captures the local LAN in its tunnel.
+     *
+     * Full-tunnel mode always does.  Bypass-LAN mode normally leaves private
+     * subnets out of the route table, but an EasyTier/extra route that
+     * overlaps the connected LAN is kept in the table so it survives a
+     * handover; that overlap must be sent direct before the EasyTier rule.
+     */
+    private fun includeDirectLanRule(plan: EasyTierRoutePlan): Boolean {
+        return EasyTierRoutingRules.needsDirectLanRule(
+            vpnMode = SettingsManager.isVpnMode(),
+            bypassLan = SettingsManager.routingRulesetsBypassLan(),
+            plan = plan
+        )
+    }
+
+    /**
      * Inject EasyTier SOCKS5 outbound and routing rules into the Xray config.
      *
      * A direct rule for the device's own LAN is inserted before the EasyTier
@@ -1374,21 +1406,34 @@ object CoreConfigManager {
      * range baseline is deliberately not used.
      */
     private fun injectEasyTier(context: Context, v2rayConfig: V2rayConfig) {
-        // Fail closed: a rule may only point at an EasyTier listener that this
-        // process started and verified.  Without this check the rule would be
-        // written even when EasyTier failed to start, handing mesh traffic to
-        // whatever process owns the loopback port.
-        if (!EasyTierPlugin.isSessionActive()) {
-            LogUtil.w(
-                AppConfig.TAG,
-                "EasyTier: no verified listener in this process; skipping route injection"
-            )
+        val plan = buildEasyTierRoutePlan(context)
+        if (plan == null) {
+            lastAppliedEasyTierCidrs = emptySet()
             return
         }
-        val plan = buildEasyTierRoutePlan(context) ?: return
-        if (plan.easyTierCidrs.isEmpty() && plan.localLanCidrs.isEmpty()) return
+        val includeDirectLan = includeDirectLanRule(plan)
+        val sessionActive = EasyTierPlugin.isSessionActive()
+        lastAppliedEasyTierCidrs = if (sessionActive) plan.easyTierCidrs.toSet() else emptySet()
 
-        if (v2rayConfig.outbounds.none { it.tag == EasyTierPlugin.OUTBOUND_TAG }) {
+        if (!sessionActive) {
+            // Fail closed: a rule may only point at an EasyTier listener that
+            // this process started and verified.  Without this check the rule
+            // would be written even when EasyTier failed to start, handing
+            // mesh traffic to whatever process owns the loopback port.  The
+            // direct LAN rule may still be required: the VpnService route
+            // table already captured an overlapping LAN block.
+            LogUtil.w(
+                AppConfig.TAG,
+                "EasyTier: no verified listener in this process; skipping EasyTier outbound/rule"
+            )
+        }
+        if (plan.easyTierCidrs.isEmpty() &&
+            (!includeDirectLan || plan.localLanCidrs.isEmpty())
+        ) {
+            return
+        }
+
+        if (sessionActive && v2rayConfig.outbounds.none { it.tag == EasyTierPlugin.OUTBOUND_TAG }) {
             val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return
             val socks5Outbound = V2rayConfig.OutboundBean(
                 tag = EasyTierPlugin.OUTBOUND_TAG,
@@ -1409,19 +1454,25 @@ object CoreConfigManager {
                     plan.conflicts.joinToString { "${it.cidr} (${it.reason})" }
             )
         }
+        LogUtil.d(
+            AppConfig.TAG,
+            "EasyTier: route plan vpn=${plan.vpnRoutes.size} easyTier=${plan.easyTierCidrs.size} " +
+                "lan=${plan.localLanCidrs.size} lanOverlap=${plan.vpnRoutesOverlapLocalLan} " +
+                "directRule=$includeDirectLan sessionActive=$sessionActive"
+        )
 
         // Insert AFTER any DNS rule so DNS hijacking (port 53) takes priority.
-        // The direct LAN rule is only needed in full-tunnel mode; in bypass-LAN
-        // mode the VpnService route table already excludes the local LAN.
-        val includeDirectLan = !SettingsManager.routingRulesetsBypassLan()
         val additions = EasyTierRoutingRules.buildMissing(
             v2rayConfig.routing.rules,
             plan,
-            includeLocalLanDirect = includeDirectLan
+            includeLocalLanDirect = includeDirectLan,
+            includeEasyTierRule = sessionActive
         )
         EasyTierRoutingRules.insertAfterDnsRules(v2rayConfig.routing.rules, additions)
-        additions.firstOrNull { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }?.let {
-            LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule for CIDRs: ${it.ip}")
+        if (sessionActive) {
+            additions.firstOrNull { it.outboundTag == EasyTierPlugin.OUTBOUND_TAG }?.let {
+                LogUtil.i(AppConfig.TAG, "EasyTier: injected routing rule for CIDRs: ${it.ip}")
+            }
         }
     }
 
@@ -1434,11 +1485,31 @@ object CoreConfigManager {
      * @return Modified JSON string, or the original if EasyTier is disabled or injection fails.
      */
     private fun injectEasyTierIntoCustomConfig(context: Context, json: String): String {
+        val plan = buildEasyTierRoutePlan(context)
+        if (plan == null) {
+            lastAppliedEasyTierCidrs = emptySet()
+            return json
+        }
+        val includeDirectLan = includeDirectLanRule(plan)
+        val sessionActive = EasyTierPlugin.isSessionActive()
+        lastAppliedEasyTierCidrs = if (sessionActive) plan.easyTierCidrs.toSet() else emptySet()
+
         // Same fail-closed rule as injectEasyTier: never rewrite a user config
-        // to point at a listener this process does not own.
-        if (!EasyTierPlugin.isSessionActive()) return json
-        val plan = buildEasyTierRoutePlan(context) ?: return json
-        if (plan.easyTierCidrs.isEmpty() && plan.localLanCidrs.isEmpty()) return json
+        // to point at a listener this process does not own.  A direct LAN
+        // rule is still needed when the VpnService route table captured an
+        // overlapping LAN block, otherwise that traffic would be handed to
+        // the user's default outbound.
+        if (!sessionActive) {
+            LogUtil.w(
+                AppConfig.TAG,
+                "EasyTier: no verified listener in this process; skipping custom-config EasyTier outbound/rule"
+            )
+        }
+        if (plan.easyTierCidrs.isEmpty() &&
+            (!includeDirectLan || plan.localLanCidrs.isEmpty())
+        ) {
+            return json
+        }
 
         return try {
             val obj = JsonUtil.parseString(json)?.takeIf { it.isJsonObject }?.asJsonObject ?: return json
@@ -1449,7 +1520,7 @@ object CoreConfigManager {
             val hasEasyTierOutbound = outbounds.any { e ->
                 e.isJsonObject && e.asJsonObject.get("tag")?.asString == EasyTierPlugin.OUTBOUND_TAG
             }
-            if (!hasEasyTierOutbound) {
+            if (sessionActive && !hasEasyTierOutbound) {
                 val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return json
                 val socks5Outbound = com.google.gson.JsonObject().apply {
                     addProperty("tag", EasyTierPlugin.OUTBOUND_TAG)
@@ -1471,11 +1542,6 @@ object CoreConfigManager {
             val rules = routing.get("rules")?.takeIf { it.isJsonArray }?.asJsonArray
                 ?: JsonArray().also { routing.add("rules", it) }
 
-            // The direct LAN rule is only needed in full-tunnel mode.  In
-            // bypass-LAN mode the VpnService route table already keeps the LAN
-            // direct, and an extra rule could steal a LAN DNS query from the
-            // user's DNS rule.
-            val includeDirectLan = !SettingsManager.routingRulesetsBypassLan()
             if (includeDirectLan && plan.localLanCidrs.isNotEmpty() &&
                 outbounds.none { outbound ->
                     outbound.isJsonObject &&
@@ -1519,7 +1585,7 @@ object CoreConfigManager {
                     addProperty("outboundTag", AppConfig.TAG_DIRECT)
                 })
             }
-            if (plan.easyTierCidrs.isNotEmpty() && !hasEasyTierRule) {
+            if (sessionActive && plan.easyTierCidrs.isNotEmpty() && !hasEasyTierRule) {
                 toInsert.add(com.google.gson.JsonObject().apply {
                     addProperty("type", "field")
                     add("ip", Gson().toJsonTree(plan.easyTierCidrs))

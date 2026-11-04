@@ -66,6 +66,8 @@ class EasyTierRoutePlannerTest {
         assertFalse(plan.easyTierCidrs.contains("192.168.0.0/16"))
         assertTrue(plan.easyTierCidrs.contains("192.168.0.0/24"))
         assertTrue(plan.easyTierCidrs.contains("192.168.2.0/23"))
+        assertEquals(listOf("192.168.0.0/16"), plan.vpnRoutes)
+        assertTrue(plan.vpnRoutesOverlapLocalLan)
         assertTrue(plan.conflicts.isNotEmpty())
     }
 
@@ -321,5 +323,66 @@ class EasyTierRoutePlannerTest {
         val cidrs = EasyTierPlugin.parseMeshCidrs(json)
 
         assertTrue(cidrs.contains("192.168.70.0/24"))
+    }
+
+    @Test
+    fun `an overlapping mesh route stays in the tunnel route table`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            vpnClientCidr = "10.10.14.1/30",
+            meshCidrs = listOf("192.168.1.0/24"),
+            virtualIp = null,
+            extraCidrs = emptyList()
+        )
+
+        // The Xray rule keeps the LAN direct while the device is on it...
+        assertFalse(plan.easyTierCidrs.contains("192.168.1.0/24"))
+        // ...but the VpnService route table is frozen, so the route must not
+        // disappear when the device leaves that LAN.
+        assertTrue(plan.vpnRoutes.contains("192.168.1.0/24"))
+        assertTrue(plan.vpnRoutesOverlapLocalLan)
+    }
+
+    @Test
+    fun `an overlapping extra route stays in the tunnel route table`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = listOf("192.168.31.0/24"),
+            vpnClientCidr = null,
+            meshCidrs = emptyList(),
+            virtualIp = null,
+            extraCidrs = listOf("192.168.31.0/24")
+        )
+
+        assertTrue(plan.vpnRoutes.contains("192.168.31.0/24"))
+        assertTrue(plan.vpnRoutesOverlapLocalLan)
+        assertFalse(plan.easyTierCidrs.contains("192.168.31.0/24"))
+    }
+
+    @Test
+    fun `non-overlapping routes keep the lan overlap flag false`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = listOf("192.168.1.0/24"),
+            vpnClientCidr = null,
+            meshCidrs = listOf("10.144.144.0/24"),
+            virtualIp = "10.144.144.1",
+            extraCidrs = emptyList()
+        )
+
+        assertEquals(listOf("10.144.144.0/24"), plan.vpnRoutes)
+        assertFalse(plan.vpnRoutesOverlapLocalLan)
+    }
+
+    @Test
+    fun `the vpn client subnet is excluded from the tunnel route table`() {
+        val plan = EasyTierRoutePlanner.plan(
+            localLanCidrs = emptyList(),
+            vpnClientCidr = "10.10.14.1/30",
+            meshCidrs = emptyList(),
+            virtualIp = null,
+            extraCidrs = listOf("10.10.14.0/24")
+        )
+
+        assertFalse(plan.vpnRoutes.contains("10.10.14.0/30"))
+        assertTrue(plan.vpnRoutes.contains("10.10.14.4/30"))
     }
 }

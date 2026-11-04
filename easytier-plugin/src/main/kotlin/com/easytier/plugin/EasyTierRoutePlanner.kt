@@ -207,13 +207,23 @@ data class EasyTierRouteConflict(
  *
  * @property localLanCidrs   directly connected LAN blocks that must stay direct
  * @property easyTierCidrs   blocks that should be routed through EasyTier
- * @property vpnRoutes       blocks that must be added to the VpnService builder
+ * @property vpnRoutes       blocks that must be added to the VpnService builder.
+ *   This set deliberately does **not** depend on the currently connected LAN:
+ *   a route subtracted while the device sits on Wi-Fi would otherwise stay
+ *   missing after a handover to cellular, because Android cannot add routes to
+ *   an established VPN interface.
+ * @property vpnRoutesOverlapLocalLan whether any [vpnRoutes] entry overlaps a
+ *   block in [localLanCidrs].  The caller must keep those LAN destinations
+ *   direct; otherwise capturing them in the tunnel would send LAN traffic to
+ *   the proxy.
  * @property conflicts       overlaps that were resolved in favour of the local LAN
+ *   for the Xray routing rule (the route is still kept in [vpnRoutes])
  */
 data class EasyTierRoutePlan(
     val localLanCidrs: List<String> = emptyList(),
     val easyTierCidrs: List<String> = emptyList(),
     val vpnRoutes: List<String> = emptyList(),
+    val vpnRoutesOverlapLocalLan: Boolean = false,
     val conflicts: List<EasyTierRouteConflict> = emptyList()
 )
 
@@ -320,12 +330,13 @@ object EasyTierRoutePlanner {
         for (candidate in collapsed) {
             val overlap = reserved.firstOrNull { it.intersects(candidate) }
             if (overlap != null) {
-                conflicts.add(
-                    EasyTierRouteConflict(
-                        candidate.toString(),
-                        "overlaps ${overlap}${if (bypassLocalLan) "; local LAN wins" else ""}"
-                    )
-                )
+                val reason = when {
+                    vpnClient != null && vpnClient.intersects(candidate) ->
+                        "overlaps the VPN client subnet $overlap"
+                    else ->
+                        "overlaps $overlap; local LAN stays direct, route stays in the tunnel table"
+                }
+                conflicts.add(EasyTierRouteConflict(candidate.toString(), reason))
             }
             val remaining = subtractAll(candidate, reserved)
             if (remaining.size > MAX_ROUTES_PER_CANDIDATE) {
@@ -340,13 +351,39 @@ object EasyTierRoutePlanner {
             easyTier.addAll(remaining)
         }
 
+        // The VpnService route table is frozen at Builder.establish().  Keep it
+        // independent of the physical LAN so leaving Wi-Fi does not leave a
+        // required mesh route behind.  Only the VPN's own client /30 is
+        // excluded: capturing it would route the tunnel's own address back
+        // into itself.
+        val tunnelExclusions = listOfNotNull(vpnClient)
+        val tunnelRoutes = mutableListOf<EasyTierCidr>()
+        for (candidate in collapsed) {
+            val remaining = subtractAll(candidate, tunnelExclusions)
+            if (remaining.size > MAX_ROUTES_PER_CANDIDATE) {
+                conflicts.add(
+                    EasyTierRouteConflict(
+                        candidate.toString(),
+                        "too many resulting tunnel routes; skipped"
+                    )
+                )
+                continue
+            }
+            tunnelRoutes.addAll(remaining)
+        }
+
         val easyTierCidrs = collapse(easyTier).map { it.toString() }.sorted()
         val directCidrs = if (bypassLocalLan) localLan.map { it.toString() }.sorted() else emptyList()
+        val vpnRoutes = collapse(tunnelRoutes).map { it.toString() }.sorted()
+        val vpnRoutesOverlapLocalLan = tunnelRoutes.any { route ->
+            localLan.any { it.intersects(route) }
+        }
 
         return EasyTierRoutePlan(
             localLanCidrs = directCidrs,
             easyTierCidrs = easyTierCidrs,
-            vpnRoutes = easyTierCidrs,
+            vpnRoutes = vpnRoutes,
+            vpnRoutesOverlapLocalLan = vpnRoutesOverlapLocalLan,
             conflicts = conflicts.distinct()
         )
     }

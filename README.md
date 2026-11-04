@@ -110,15 +110,43 @@ still be reached by adding that subnet under **Extra EasyTier Routes**, or
 automatically through discovered `proxy_cidrs`.
 
 Only private/special-use local subnets are eligible for the direct rule. The
-Xray direct rule is added only in full-tunnel mode, where the VPN actually
-captures LAN traffic; in bypass-LAN mode the VpnService route table already
-leaves the LAN direct. Rules are inserted after any DNS rule (`dns-out` or an
-explicit port 53 rule) so local DNS is not diverted before the user's DNS
-configuration runs.
+Xray direct rule is added in full-tunnel mode, where the VPN always captures
+LAN traffic, and in bypass-LAN mode when an EasyTier/extra route overlaps the
+connected LAN. Rules are inserted after any DNS rule (`dns-out` or an explicit
+port 53 rule) so local DNS is not diverted before the user's DNS configuration
+runs.
 
 Discovered mesh CIDRs are cached for 5 seconds (`getMeshCidrsStatic()`); they
 are also persisted to `easytier_last_routes.json` so the VPN interface can be
 built with a usable routing baseline before EasyTier starts.
+
+### Network changes (Wi-Fi ↔ cellular)
+
+The Android `VpnService` route table is frozen once the interface is
+established. It is therefore built from a network-independent plan: the
+EasyTier virtual-IP subnet, discovered mesh CIDRs, persisted last-known routes
+and **Extra EasyTier Routes**. The currently connected LAN is only subtracted
+from the Xray EasyTier rule, never from the tunnel route table.
+
+When a route overlaps the connected Wi-Fi LAN, the LAN stays in the tunnel
+route table so it still exists after switching to cellular, and a direct Xray
+rule keeps LAN destinations direct while the device is on that Wi-Fi. After
+the handover:
+
+- `NetworkMonitor` reloads the core only for the monitor instance that is
+  still current, and a late `onLost` for the old network no longer clears the
+  new underlying network.
+- The previous mesh CIDRs are persisted before EasyTier is restarted, so the
+  rebuilt rules survive the re-convergence window.
+- A bounded watcher refreshes the Xray rules (config-only reload, EasyTier
+  stays up) when the live mesh gains CIDRs after the initial poll.
+
+Android cannot add a route to an already established VPN interface. A remote
+LAN that is only discovered *after* the interface was built, and is not in
+**Extra EasyTier Routes**, will be present in the Xray rules but not in the
+tunnel until the VPN is restarted; the log says
+`new EasyTier CIDRs are not in the current VpnService route table`. Add the
+subnet as an Extra Route or restart the VPN once after the peer has converged.
 
 ### HEV TUN performance
 
