@@ -175,7 +175,12 @@ object RootProxyManager {
             appendLine("ip rule add fwmark $MARK table $TABLE priority $PRIORITY")
             // mark the device's own packets into the tun (Root mode only)
             if (captureDeviceTraffic) {
-                append(buildMangleMarking(context, "iptables", appUid, perAppEnabled, bypassApps, selectedUids))
+                append(
+                    buildMangleMarking(
+                        "iptables", appUid, perAppEnabled, bypassApps, selectedUids, lanShare,
+                        easyTierCidrs = buildEasyTierRootCidrs(context, ipv6 = false)
+                    )
+                )
                 // DNS DNAT: rewrite DNS queries destined for LAN/private resolvers to a
                 // public IP so the core's routing engine can resolve them via the configured
                 // remote DNS (dns-out) instead of falling through to a geoip:private → direct
@@ -195,7 +200,12 @@ object RootProxyManager {
                     appendLine("ip -6 addr add ${AppConfig.ROOT_TUN_ADDR_V6} dev $TUN 2>/dev/null || true")
                     appendLine("ip -6 route replace default dev $TUN table $TABLE 2>/dev/null || true")
                     appendLine("ip -6 rule add fwmark $MARK table $TABLE priority $PRIORITY 2>/dev/null || true")
-                    append(buildMangleMarking(context, "ip6tables", appUid, perAppEnabled, bypassApps, selectedUids))
+                    append(
+                        buildMangleMarking(
+                            "ip6tables", appUid, perAppEnabled, bypassApps, selectedUids, lanShare,
+                            easyTierCidrs = buildEasyTierRootCidrs(context, ipv6 = true)
+                        )
+                    )
                     append(buildDnsDnat("ip6tables"))
                 } else {
                     // v6 disabled: blackhole native v6 egress for the captured apps so they
@@ -303,13 +313,14 @@ object RootProxyManager {
      * - bypass mode: the selected apps go fully direct, everything else is captured;
      * - proxy mode: only the selected apps are captured.
      */
-    private fun buildMangleMarking(
-        context: Context,
+    internal fun buildMangleMarking(
         cmd: String,
         appUid: Int,
         perAppEnabled: Boolean,
         bypassApps: Boolean,
         selectedUids: List<String>,
+        lanShare: Boolean,
+        easyTierCidrs: List<String> = emptyList(),
     ): String {
         val allowMode = perAppEnabled && !bypassApps
         val bypassSelected = perAppEnabled && bypassApps && selectedUids.isNotEmpty()
@@ -332,14 +343,17 @@ object RootProxyManager {
             // LAN/router resolver (192.168.x / 10.x) would be returned direct and resolved by
             // the local ISP resolver (DNS leak + CDN mis-resolution, e.g. Instagram media).
             // The MARK survives a later RETURN, so the marked query still routes into the tun.
+            // Hotspot clients' DNS is forwarded by netd under AID_DNS_TETHER. Without LAN sharing
+            // their traffic goes direct, so a FakeDNS answer from the core would black-hole it.
+            if (!lanShare) appendLine("$cmd -t mangle -A $CHAIN -m owner --uid-owner ${AppConfig.ROOT_DNS_TETHER_UID} -j RETURN")
             appendLine("$cmd -t mangle -A $CHAIN -p udp --dport 53 -j MARK --set-xmark $MARK")
             appendLine("$cmd -t mangle -A $CHAIN -p tcp --dport 53 -j MARK --set-xmark $MARK")
             // EasyTier mesh CIDRs must be marked BEFORE the private-range RETURN rules:
             // a RETURN in a user chain stops processing the rest of that chain, so the
             // old placement after the RETURNs made the EasyTier marks unreachable.
             // The plan has already subtracted the device's own LAN, so local services
-            // stay direct.
-            val easyTierCidrs = buildEasyTierRootCidrs(context, ipv6 = cmd == "ip6tables")
+            // stay direct.  The caller resolves the CIDRs so this stays a pure
+            // string builder that JVM unit tests can drive without a Context.
             easyTierCidrs.forEach { cidr ->
                 appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
             }

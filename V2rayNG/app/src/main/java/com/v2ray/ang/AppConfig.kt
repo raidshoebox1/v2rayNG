@@ -44,6 +44,7 @@ object AppConfig {
     const val PREF_FRAGMENT_LENGTH = "pref_fragment_length"
     const val PREF_FRAGMENT_INTERVAL = "pref_fragment_interval"
     const val PREF_FRAGMENT_MAXSPLIT = "pref_fragment_maxsplit"
+    const val PREF_HYSTERIA_PORT_HOPPING_INTERVAL = "pref_hysteria_port_hopping_interval"
     const val PREF_OBSERVATORY_LEAST_PING_INTERVAL = "pref_observatory_least_ping_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_INTERVAL = "pref_observatory_least_load_interval"
     const val PREF_OBSERVATORY_LEAST_LOAD_METHOD = "pref_observatory_least_load_method"
@@ -70,7 +71,10 @@ object AppConfig {
     const val PREF_SOCKS_ENABLE_UDP = "pref_socks_enable_udp"
     const val PREF_REMOTE_DNS = "pref_remote_dns"
     const val PREF_DOMESTIC_DNS = "pref_domestic_dns"
+    const val PREF_DNS_VALIDATE_REGION = "pref_dns_validate_region"
     const val PREF_DNS_HOSTS = "pref_dns_hosts"
+    const val PREF_DNS_PARALLEL_QUERY = "pref_dns_parallel_query"
+    const val PREF_DNS_SERVE_STALE = "pref_dns_serve_stale"
     const val PREF_DELAY_TEST_URL = "pref_delay_test_url"
     const val PREF_IP_API_URL = "pref_ip_api_url"
     const val PREF_LOGLEVEL = "pref_core_loglevel"
@@ -101,6 +105,9 @@ object AppConfig {
     const val BROADCAST_ACTION_SERVICE = "$ANG_PACKAGE.action.service"
     const val BROADCAST_ACTION_ACTIVITY = "$ANG_PACKAGE.action.activity"
     const val BROADCAST_ACTION_WIDGET_CLICK = "$ANG_PACKAGE.action.widget.click"
+
+    /** Intent extras. */
+    const val EXTRA_REFRESH_AFTER_IMPORT = "$ANG_PACKAGE.extra.REFRESH_AFTER_IMPORT"
 
     /** Tasker extras. */
     const val TASKER_EXTRA_BUNDLE = "com.twofortyfouram.locale.intent.extra.BUNDLE"
@@ -235,6 +242,7 @@ object AppConfig {
     const val ROOT_IPTABLES_CHAIN = "CORE_FILTER"
     const val ROOT_FWMARK = 255            // defensive RETURN tag; hev's only upstream socket is loopback (already bypassed)
     const val ROOT_MARK_ROUTE = 1          // packets we want pushed into the tun device
+    const val ROOT_DNS_TETHER_UID = 1052   // AID_DNS_TETHER: netd forwards hotspot clients' DNS under this uid
     const val ROOT_ROUTE_TABLE = 2024
     const val ROOT_RULE_PRIORITY = 1000
     const val ROOT_TUN_NAME = "utun7788"
@@ -283,6 +291,9 @@ object AppConfig {
     const val TLS = "tls"
     const val REALITY = "reality"
     const val HEADER_TYPE_HTTP = "http"
+
+    /** Default storage service of the Xray-core xdrive transport ("service" field). */
+    const val XDRIVE_SERVICE_GOOGLE_DRIVE = "google-drive"
 
     const val UNIDENTIFIED_PACKAGE = "__unknown_app__"
 

@@ -15,6 +15,7 @@ import com.v2ray.ang.dto.entities.RulesetItem
 import com.v2ray.ang.enums.BalancerStrategyType
 import com.v2ray.ang.enums.CoreResolvedType
 import com.v2ray.ang.enums.EConfigType
+import com.v2ray.ang.enums.NetworkType
 import com.v2ray.ang.extension.isNotNullEmpty
 import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.SettingsManager
@@ -487,7 +488,10 @@ object CoreConfigManager {
         v2rayConfig.fakedns = null
         v2rayConfig.stats = null
         v2rayConfig.policy = null
-        v2rayConfig.outbounds.forEach { key -> key.mux = null }
+        // xdrive outbounds keep their mux: Xray-core refuses to load them without Mux.Cool.
+        v2rayConfig.outbounds
+            .filter { it.streamSettings?.network != NetworkType.XDRIVE.type }
+            .forEach { key -> key.mux = null }
     }
 
     /**
@@ -664,20 +668,18 @@ object CoreConfigManager {
         }
 
         if (MmkvManager.decodeSettingsBool(AppConfig.PREF_FAKE_DNS_ENABLED) == true) {
-            val geositeCn = arrayListOf(AppConfig.GEOSITE_CN)
             val routingDomains = configContext.routingDomainRules
                 .asSequence()
                 .filter { it.outboundTag != AppConfig.TAG_BLOCKED }
                 .flatMap { it.domain.asSequence() }
                 .toList()
                 .distinct()
-            val finalDomain = geositeCn + routingDomains
             // fakedns with all domains to make it always top priority
             v2rayConfig.dns?.servers?.add(
                 0,
                 V2rayConfig.DnsBean.ServersBean(
                     address = "fakedns",
-                    domains = finalDomain
+                    domains = routingDomains,
                 )
             )
         }
@@ -915,17 +917,20 @@ object CoreConfigManager {
         val domesticDns = SettingsManager.getDomesticDnsServers()
 
         val hosts = buildDnsHostsFromRoutingRules(configContext)
-        buildDnsCnModeFromRoutingRules(
-            configContext = configContext,
-            servers = servers,
-            remoteDns = remoteDns,
-            domesticDns = domesticDns
-        )
+        val validateRegion = MmkvManager.decodeSettingsBool(AppConfig.PREF_DNS_VALIDATE_REGION, true) == true
         buildDnsFromRoutingRules(
             configContext = configContext,
             servers = servers,
             remoteDns = remoteDns,
-            domesticDns = domesticDns
+            domesticDns = domesticDns,
+            excludeRegionDomains = validateRegion,
+        )
+        buildDnsValidateRegionFromRoutingRules(
+            configContext = configContext,
+            servers = servers,
+            remoteDns = remoteDns,
+            domesticDns = domesticDns,
+            validateRegion = validateRegion
         )
 
         remoteDns.forEach { servers.add(it) }
@@ -935,8 +940,9 @@ object CoreConfigManager {
             hosts = hosts,
             tag = AppConfig.TAG_DNS,
             disableFallbackIfMatch = true,
-            enableParallelQuery = if ((domesticDns.size + remoteDns.size) > 2) true else null,
         )
+        v2rayConfig.dns?.serveStale = MmkvManager.decodeSettingsBool(AppConfig.PREF_DNS_SERVE_STALE, false) == true
+        v2rayConfig.dns?.enableParallelQuery = MmkvManager.decodeSettingsBool(AppConfig.PREF_DNS_PARALLEL_QUERY, false) == true
 
         v2rayConfig.routing.rules.add(
             0,
@@ -1012,34 +1018,30 @@ object CoreConfigManager {
         return hosts
     }
 
-    private fun buildDnsCnModeFromRoutingRules(
+    private fun buildDnsValidateRegionFromRoutingRules(
         configContext: CoreConfigContext,
         servers: ArrayList<Any>,
         remoteDns: List<String>,
         domesticDns: List<String>,
+        validateRegion: Boolean,
     ) {
-        val cnRegionFilter = { domain: String ->
-            domain.startsWith("geosite:") && (domain.endsWith("-cn") || domain.endsWith("@cn"))
-                    || domain == AppConfig.GEOSITE_CN
-        }
-        val isCnRoutingMode = configContext.routingDomainRules
-            .asSequence()
-            .filter { it.outboundTag == AppConfig.TAG_DIRECT }
-            .flatMap { it.domain.asSequence() }
-            .any { it == AppConfig.GEOSITE_CN }
-
-        if (!isCnRoutingMode) {
+        if (!validateRegion
+            || configContext.routingRegion.isNullOrBlank()) {
             return
         }
 
-        val geoipCn = arrayListOf(AppConfig.GEOIP_CN)
-        val cnDomains = configContext.routingDomainRules
+        val region = configContext.routingRegion
+
+        val regionFilter = buildRegionFilter(configContext)
+
+        val geoipRegion = arrayListOf("geoip:${region}")
+        val regionDomains = configContext.routingDomainRules
             .asSequence()
             .filter { it.outboundTag == AppConfig.TAG_DIRECT }
             .flatMap { it.domain.asSequence() }
-            .filter { cnRegionFilter(it) }
+            .filter { regionFilter(it) }
             .toList()
-        if (cnDomains.isEmpty()) {
+        if (regionDomains.isEmpty()) {
             return
         }
 
@@ -1047,8 +1049,8 @@ object CoreConfigManager {
             servers.add(
                 V2rayConfig.DnsBean.ServersBean(
                     address = address,
-                    domains = cnDomains,
-                    expectIPs = geoipCn,
+                    domains = regionDomains,
+                    expectIPs = geoipRegion,
                     skipFallback = true,
                     tag = AppConfig.TAG_DOMESTIC_DNS
                 )
@@ -1058,7 +1060,7 @@ object CoreConfigManager {
             servers.add(
                 V2rayConfig.DnsBean.ServersBean(
                     address = address,
-                    domains = cnDomains,
+                    domains = regionDomains,
                     skipFallback = true,
                 )
             )
@@ -1070,15 +1072,20 @@ object CoreConfigManager {
         servers: ArrayList<Any>,
         remoteDns: List<String>,
         domesticDns: List<String>,
+        excludeRegionDomains: Boolean,
     ) {
+        val regionFilter = if (excludeRegionDomains) buildRegionFilter(configContext) else { _: String -> false }
+
         configContext.routingDomainRules.forEach { rule ->
             when (rule.outboundTag) {
                 AppConfig.TAG_DIRECT -> {
+                    val domains = rule.domain.filterNot { regionFilter(it) }
+                    if (domains.isEmpty()) return@forEach
                     domesticDns.forEachIndexed { dnsIndex, address ->
                         servers.add(
                             V2rayConfig.DnsBean.ServersBean(
                                 address = address,
-                                domains = rule.domain,
+                                domains = domains,
                                 skipFallback = true,
                                 finalQuery = if (dnsIndex == domesticDns.lastIndex) true else null,
                                 tag = AppConfig.TAG_DOMESTIC_DNS
@@ -1100,6 +1107,17 @@ object CoreConfigManager {
                     }
                 }
             }
+        }
+    }
+
+    private fun buildRegionFilter(configContext: CoreConfigContext): (String) -> Boolean {
+        val region = configContext.routingRegion
+        return if (region.isNullOrBlank()) { _: String ->
+            false
+        } else { domain: String ->
+            domain.startsWith("geosite:")
+                    && (domain.endsWith("-${region}") || domain.endsWith("@${region}"))
+                    || domain == "geosite:${region}"
         }
     }
 

@@ -47,10 +47,12 @@ object CoreConfigContextBuilder {
         val resolvedOutbounds = listOf(primaryResolvedOutbound) + routingResolvedOutbounds
         val fallbackResolvedOutbounds = resolveFallbackOutbounds(resolvedOutbounds)
         val routingDomainRules = collectRoutingDomainRulesForDns()
+        val routingRegion = calculateRoutingRegionForDns()
 
         return CoreConfigContext(
             context = context,
             guid = guid,
+            routingRegion = routingRegion,
             resolvedOutbounds = resolvedOutbounds + fallbackResolvedOutbounds,
             routingDomainRules = routingDomainRules,
         )
@@ -249,6 +251,33 @@ object CoreConfigContextBuilder {
             }
 
         return result
+    }
+
+    private fun calculateRoutingRegionForDns(): String? {
+        val rulesetItems = MmkvManager.decodeRoutingRulesets()?.filter { it.enabled } ?: return null
+        if (rulesetItems.size < 2) {
+            return null
+        }
+
+        val (secondLast, last) = rulesetItems.takeLast(2).let {
+            it.getOrNull(0) to it.getOrNull(1)
+        }
+        if (secondLast?.outboundTag != AppConfig.TAG_DIRECT
+            || last?.outboundTag != AppConfig.TAG_DIRECT) {
+            return null
+        }
+        val secondLastValue = secondLast.ip?.takeIf { it.size == 1 && it[0].startsWith("geoip:") }?.get(0)?.substringAfter("geoip:")
+        val lastValue = last.domain?.takeIf { it.size == 1 && it[0].startsWith("geosite:") }?.get(0)?.substringAfter("geosite:")
+        val region = if (secondLastValue != null && lastValue != null) {
+            if (secondLastValue == lastValue) {
+                secondLastValue
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+        return region
     }
 
     /**
