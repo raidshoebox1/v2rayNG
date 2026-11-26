@@ -40,6 +40,14 @@ object RootProxyManager {
     private const val FWMARK = AppConfig.ROOT_FWMARK
     private const val MARK = AppConfig.ROOT_MARK_ROUTE
 
+    /**
+     * `ip rule` priorities root mode can add.  [buildTeardown] removes every entry, so a
+     * priority added by [buildTun2socksSetup] or [buildLanShareSetup] without being listed here
+     * survives the teardown and keeps steering traffic into a table that was flushed.
+     * 5024 is the EasyTier mesh-CIDR gate (added once per CIDR by [buildLanShareSetup]).
+     */
+    private val ROOT_RULE_PRIORITIES = listOf(5000, 5010, 5020, 5024, 5025, 5026, 5027, 5030, 5040, 5050, 6000)
+
     // Local / private / multicast destinations that must never be proxied.
     private val bypassCidrs = listOf(
         "0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16",
@@ -91,7 +99,8 @@ object RootProxyManager {
     }
 
     private fun teardown(context: Context) {
-        RootShell.runScript(context, "teardown_rules.sh", buildTeardown(context))
+        val runDir = File(context.filesDir, AppConfig.ROOT_RUNTIME_DIR)
+        RootShell.runScript(context, "teardown_rules.sh", buildTeardown(runDir))
     }
 
     // --------------------------------------------------------------- TUN2SOCKS
@@ -285,8 +294,15 @@ object RootProxyManager {
      * Root mode runs after [com.v2ray.ang.core.CoreServiceManager] has started
      * EasyTier, so the live CIDR list is usually available; the persisted
      * last-known list covers the first moments after a restart.
+     *
+     * Fail closed like the VPN path ([CoreConfigManager]): a rule may only point
+     * at a listener this process started and verified.  Without the check, a
+     * persisted last-known list marks and routes mesh CIDRs into a proxy account
+     * that has no EasyTier instance behind it, so those destinations black-hole
+     * until the VPN is restarted.
      */
     private fun buildEasyTierRootCidrs(context: Context, ipv6: Boolean): List<String> {
+        if (!EasyTierPlugin.isSessionActive()) return emptyList()
         val etConfig = EasyTierSettingsManager.getEasyTierConfig(context) ?: return emptyList()
         if (!etConfig.enabled) return emptyList()
         return try {
@@ -299,7 +315,14 @@ object RootProxyManager {
                 lastKnownCidrs = EasyTierPlugin.getLastKnownMeshCidrs(context),
                 bypassLocalLan = EasyTierSettingsManager.isBypassLocalLan(context)
             )
-            plan.easyTierCidrs.filter { it.contains(":") == ipv6 }
+            val cidrs = plan.easyTierCidrs.filter { it.contains(":") == ipv6 }
+            if (cidrs.isNotEmpty()) {
+                LogUtil.d(
+                    AppConfig.TAG,
+                    "EasyTier: re-marking ${cidrs.size} mesh CIDR(s) in the root mangle chain (ipv6=$ipv6)"
+                )
+            }
+            cidrs
         } catch (e: Throwable) {
             LogUtil.w(AppConfig.TAG, "EasyTier: failed to build root route plan", e)
             emptyList()
@@ -356,9 +379,6 @@ object RootProxyManager {
             // string builder that JVM unit tests can drive without a Context.
             easyTierCidrs.forEach { cidr ->
                 appendLine("$cmd -t mangle -A $CHAIN -d $cidr -j MARK --set-xmark $MARK")
-            }
-            if (easyTierCidrs.isNotEmpty()) {
-                LogUtil.d(AppConfig.TAG, "EasyTier: re-marked ${easyTierCidrs.size} mesh CIDRs in root mangle chain ($cmd)")
             }
             // keep LAN / private destinations direct (per-family CIDR list)
             val cidrs = if (cmd == "ip6tables") bypassCidrsV6 else bypassCidrs
@@ -585,11 +605,9 @@ object RootProxyManager {
 
     // ---------------------------------------------------------------- teardown
 
-    private fun buildTeardown(context: Context): String {
-        val runDir = File(context.filesDir, AppConfig.ROOT_RUNTIME_DIR)
+    internal fun buildTeardown(runDir: File, corePid: Int = Process.myPid()): String {
         val pidFile = File(runDir, "tun2socks.pid").absolutePath
         val oomGuardPid = File(runDir, "oomguard.pid").absolutePath
-        val corePid = Process.myPid()
         return buildString {
             // mangle (TUN2SOCKS), both families
             for (cmd in listOf("iptables", "ip6tables")) {
@@ -628,7 +646,10 @@ object RootProxyManager {
             appendLine("ip6tables -t mangle -D PREROUTING -j ${AppConfig.ROOT_V6_PRE_CHAIN} 2>/dev/null || true")
             appendLine("ip6tables -t mangle -F ${AppConfig.ROOT_V6_PRE_CHAIN} 2>/dev/null || true")
             appendLine("ip6tables -t mangle -X ${AppConfig.ROOT_V6_PRE_CHAIN} 2>/dev/null || true")
-            for (pref in listOf(5000, 5010, 5020, 5025, 5026, 5027, 5030, 5040, 5050, 6000)) {
+            // Every priority added by buildTun2socksSetup/buildLanShareSetup must appear here. 5024 is
+            // the EasyTier mesh-CIDR gate from buildLanShareSetup; leaving it behind kept
+            // resolving those destinations through a table that this teardown flushes.
+            for (pref in ROOT_RULE_PRIORITIES) {
                 appendLine("ip rule del pref $pref 2>/dev/null || true")
             }
             // tun device down + helper process

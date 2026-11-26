@@ -3,6 +3,10 @@
 -keep class com.easytier.jni.EasyTierJNI { *; }
 -keep class com.easytier.jni.EasyTierDataPlaneJNI { *; }
 -keep class com.easytier.jni.ConfigServerEventCallback { *; }
+# Rust invokes onLog by name/signature from the JNI bridge; obfuscating the
+# interface turns every native log line into a swallowed NoSuchMethodError.
+-keep interface com.easytier.jni.LogCallback { *; }
+-keep class * implements com.easytier.jni.LogCallback { *; }
 -keep class com.easytier.jni.DataPlaneTcpStream { *; }
 -keep class com.easytier.jni.DataPlaneTcpListener { *; }
 -keep class com.easytier.jni.DataPlaneUdpSocket { *; }

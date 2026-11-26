@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import com.easytier.plugin.EasyTierCidr
 import com.easytier.plugin.EasyTierPlugin
 import com.easytier.plugin.EasyTierRoutePlanner
@@ -191,17 +192,24 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── Status refresh: poll every 2 seconds while the composable is active ──
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            val status = withContext(Dispatchers.IO) {
-                EasyTierPlugin.getPeerStatus(context)
+    // ── Status refresh: poll every 2 seconds while this screen is RESUMED ──
+    // repeatOnLifecycle cancels the loop on pause/stop.  A plain
+    // LaunchedEffect(Unit) kept running with the screen off, and every iteration
+    // refreshed the cross-process `easytier_status_watch` marker that onPause()
+    // had just deleted: the VPN process then stayed in its 3s snapshot cadence
+    // (JNI + JSON + write) while nobody could read the snapshot.
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (isActive) {
+                val status = withContext(Dispatchers.IO) {
+                    EasyTierPlugin.getPeerStatus(context)
+                }
+                statusText = formatStatus(context, status)
+                // Keeps the watch marker fresh (throttled to one write a minute)
+                // so the writer stays at the fast cadence while this screen is up.
+                EasyTierPlugin.refreshStatusWatch(context)
+                delay(2000)
             }
-            statusText = formatStatus(context, status)
-            // Keeps the watch marker fresh (throttled to one write a minute)
-            // so the writer stays at the fast cadence while this screen is up.
-            EasyTierPlugin.refreshStatusWatch(context)
-            delay(2000)
         }
     }
 
@@ -343,7 +351,7 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                     val peerList = newValue.split("\n", ",")
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
-                    val invalid = peerList.filter { !isValidPeerUri(it) }
+                    val invalid = peerList.filter { !EasyTierSettingsManager.isValidPeerUri(it) }
                     if (invalid.isEmpty()) {
                         peers = newValue
                         EasyTierSettingsManager.setPeers(context, peerList)
@@ -358,7 +366,7 @@ private fun EasyTierSettingsScreen(onBackClick: () -> Unit) {
                 onValueChanged = { newValue ->
                     val trimmed = newValue.trim()
                     val port = trimmed.toIntOrNull()
-                    if (port != null && port in 1..65535) {
+                    if (port != null && port in EasyTierSettingsManager.SOCKS5_PORT_RANGE) {
                         socks5Port = trimmed
                         EasyTierSettingsManager.setSocks5Port(context, port)
                     } else {
@@ -734,36 +742,6 @@ private fun formatStatus(context: Context, status: EasyTierPlugin.MeshStatus?): 
 // ──────────────────────────────────────────────────────────────────────────
 //  Input validation
 // ──────────────────────────────────────────────────────────────────────────
-
-/** Valid EasyTier peer URI schemes. */
-private val peerSchemes = setOf("tcp", "udp", "ws", "wss", "wg", "ring")
-
-/**
- * Validate a peer URI.  Accepts schemes: tcp://, udp://, ws://, wss://, wg://, ring://.
- * Also accepts plain `host:port` (treated as TCP by EasyTier).
- *
- * Rejects empty URIs, URIs with whitespace, and scheme-prefixed URIs that
- * have no host part after `://`.
- */
-private fun isValidPeerUri(uri: String): Boolean {
-    val trimmed = uri.trim()
-    if (trimmed.isEmpty()) return false
-    // Reject any whitespace (would break TOML serialization or cause parse errors)
-    if (trimmed.any { it.isWhitespace() }) return false
-    val scheme = trimmed.substringBefore("://", "")
-    if (scheme.isNotEmpty()) {
-        if (scheme.lowercase() !in peerSchemes) return false
-        // Ensure there is a non-empty host part after the scheme
-        val rest = trimmed.substringAfter("://")
-        if (rest.isBlank()) return false
-        // Reject if the host part is empty or starts with a path separator
-        val hostPart = rest.substringBefore("/")
-        if (hostPart.isBlank()) return false
-        return true
-    }
-    // Plain host:port or hostname — require at least a colon or dot
-    return trimmed.contains(":") || trimmed.contains(".")
-}
 
 /**
  * Validate a virtual IP address.  Accepts IPv4 (a.b.c.d) or IPv4 with CIDR (a.b.c.d/n).

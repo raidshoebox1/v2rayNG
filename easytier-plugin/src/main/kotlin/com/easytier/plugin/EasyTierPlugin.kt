@@ -1058,7 +1058,12 @@ class EasyTierPlugin(private val context: Context) {
                 ensureLogCallbackRegistered()
                 setLogLevel(config.logLevel)
             } else {
+                // Dropping the Java callback alone leaves the native logger at its
+                // default Debug level, so Rust keeps formatting every record and
+                // writing it to logcat — including the config dump that carries the
+                // plaintext network secret.  Lower the native level too.
                 disableLogCallback()
+                setLogLevel("error")
             }
 
             val toml = config.toToml()

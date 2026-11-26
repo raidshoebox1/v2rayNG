@@ -25,6 +25,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+/** The EasyTier settings JSON is a few KB; anything larger is corrupt or crafted. */
+private const val EASYTIER_SETTINGS_MAX_BYTES = 256 * 1024L
+
 class BackupViewModel(application: Application) : BaseViewModel(application) {
 
     private val _webDavConfig = MutableStateFlow(MmkvManager.decodeWebDavConfig())
@@ -216,7 +219,16 @@ class BackupViewModel(application: Application) : BaseViewModel(application) {
                 // Atomicity: if EasyTier restore fails, roll back to the previous
                 // settings so the app is not left in a half-restored state.
                 val easyTierFile = File(backupDir, "easytier_settings.json")
-                if (easyTierFile.exists()) {
+                // Refuse an oversized file before readText()/Gson allocate it.
+                val easyTierSettingsTooLarge =
+                    easyTierFile.exists() && easyTierFile.length() > EASYTIER_SETTINGS_MAX_BYTES
+                if (easyTierSettingsTooLarge) {
+                    LogUtil.w(
+                        AppConfig.TAG,
+                        "EasyTier settings in the backup are too large (${easyTierFile.length()} bytes); keeping current settings"
+                    )
+                }
+                if (easyTierFile.exists() && !easyTierSettingsTooLarge) {
                     // Snapshot current EasyTier settings before overwriting
                     // In-memory rollback snapshot only: it never reaches the ZIP,
                     // so it may include the secret to make the rollback complete.

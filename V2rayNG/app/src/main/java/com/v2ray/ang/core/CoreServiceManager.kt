@@ -13,6 +13,7 @@ import android.os.PowerManager
 import android.system.OsConstants
 import androidx.core.content.ContextCompat
 import com.v2ray.ang.AppConfig
+import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.contracts.IDialerService
 import com.v2ray.ang.contracts.ServiceControl
 import com.v2ray.ang.dto.ConnectionTestResult
@@ -257,7 +258,10 @@ object CoreServiceManager {
         }
 
         val result = CoreConfigManager.getV2rayConfig(service, guid)
-        LogUtil.d(AppConfig.TAG, result.content)
+        // The serialized config carries outbound credentials.  It is only useful for
+        // local debugging, so keep it out of release builds entirely instead of relying
+        // on the user's configured log level.
+        if (BuildConfig.DEBUG) LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }

@@ -63,7 +63,41 @@ object EasyTierSettingsManager {
     private val MTU_RANGE = 576..9000
 
     /** Privileged ports are reserved for the system; the plugin never needs one. */
-    private val SOCKS5_PORT_RANGE = 1024..65535
+    val SOCKS5_PORT_RANGE = 1024..65535
+
+    /** Valid EasyTier peer URI schemes. */
+    private val PEER_SCHEMES = setOf("tcp", "udp", "ws", "wss", "wg", "ring")
+
+    /** Log levels the native logger understands; anything else silently becomes debug. */
+    private val LOG_LEVELS = setOf("off", "error", "warn", "info", "debug", "trace")
+
+    /**
+     * Validate a peer URI.  Accepts schemes: tcp://, udp://, ws://, wss://, wg://, ring://.
+     * Also accepts plain `host:port` (treated as TCP by EasyTier).
+     *
+     * Rejects empty URIs, URIs with whitespace (breaks TOML serialization) and
+     * scheme-prefixed URIs without a host part.
+     */
+    fun isValidPeerUri(uri: String): Boolean {
+        val trimmed = uri.trim()
+        if (trimmed.isEmpty()) return false
+        if (trimmed.any { it.isWhitespace() }) return false
+        val scheme = trimmed.substringBefore("://", "")
+        if (scheme.isNotEmpty()) {
+            if (scheme.lowercase() !in PEER_SCHEMES) return false
+            val rest = trimmed.substringAfter("://")
+            if (rest.isBlank()) return false
+            val hostPart = rest.substringBefore("/")
+            if (hostPart.isBlank()) return false
+            return true
+        }
+        // Plain host:port or hostname
+        return trimmed.contains(":") || trimmed.contains(".")
+    }
+
+    /** Trim and lowercase a log level, returning null when it is not supported. */
+    fun normalizeLogLevel(level: String?): String? =
+        level?.trim()?.lowercase()?.takeIf { it in LOG_LEVELS }
 
     /** Schema version for backup/restore format. Increment when the JSON shape changes. */
     private const val SCHEMA_VERSION = 3
@@ -623,7 +657,13 @@ object EasyTierSettingsManager {
         }
         json.get(KEY_PEERS)?.takeIf { it.isJsonPrimitive }?.asString?.let { peersStr ->
             val peers = peersStr.split(",").map { p -> p.trim() }.filter { it.isNotEmpty() }
-            editor.putString(KEY_PEERS, peers.joinToString(",")); hasAny = true
+            // A backup is untrusted input: one malformed peer makes the whole
+            // instance fail to start, and whitespace breaks TOML serialization.
+            val valid = peers.filter { isValidPeerUri(it) }
+            if (valid.size != peers.size) {
+                Log.w(TAG, "importFromJson: dropped ${peers.size - valid.size} invalid peer URI(s)")
+            }
+            editor.putString(KEY_PEERS, valid.joinToString(",")); hasAny = true
         }
         json.get(KEY_SOCKS5_PORT)?.takeIf { it.isJsonPrimitive }?.asInt?.let { port ->
             if (port in SOCKS5_PORT_RANGE) {
@@ -640,8 +680,12 @@ object EasyTierSettingsManager {
                 editor.putString(KEY_MTU, mtu.toString()); hasAny = true
             }
         }
-        json.get(KEY_LOG_LEVEL)?.takeIf { it.isJsonPrimitive }?.asString?.let {
-            editor.putString(KEY_LOG_LEVEL, it); hasAny = true
+        json.get(KEY_LOG_LEVEL)?.takeIf { it.isJsonPrimitive }?.asString?.let { raw ->
+            // Unknown levels are mapped to debug by the native logger; keep the
+            // stored value inside the set the UI and Rust both understand.
+            normalizeLogLevel(raw)?.let { level ->
+                editor.putString(KEY_LOG_LEVEL, level); hasAny = true
+            }
         }
         json.get(KEY_PAUSE_ON_SCREEN_OFF)?.takeIf { it.isJsonPrimitive }?.asBoolean?.let {
             editor.putBoolean(KEY_PAUSE_ON_SCREEN_OFF, it); hasAny = true
@@ -654,7 +698,13 @@ object EasyTierSettingsManager {
         }
         json.get(KEY_EXTRA_ROUTES)?.takeIf { it.isJsonPrimitive }?.asString?.let { routes ->
             val normalized = EasyTierRoutePlanner.parseList(routes)
-            editor.putString(KEY_EXTRA_ROUTES, normalized.joinToString(",")); hasAny = true
+            // Same trust rule as the settings screen: imported routes must stay in the
+            // private mesh ranges, otherwise one file redirects arbitrary traffic.
+            val safe = normalized.filter { EasyTierRoutePlanner.isSafeMeshCidr(it) }
+            if (safe.size != normalized.size) {
+                Log.w(TAG, "importFromJson: dropped ${normalized.size - safe.size} route(s) outside the private mesh ranges")
+            }
+            editor.putString(KEY_EXTRA_ROUTES, safe.joinToString(",")); hasAny = true
         }
 
         if (hasAny) {

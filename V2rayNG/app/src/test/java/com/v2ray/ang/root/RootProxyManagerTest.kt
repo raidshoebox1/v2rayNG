@@ -1,5 +1,6 @@
 package com.v2ray.ang.root
 
+import java.io.File
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -49,6 +50,33 @@ class RootProxyManagerTest {
         val credential = "user\nHEVCFG\ntouch /data/local/tmp/injected"
 
         assertEquals("'user\nHEVCFG\ntouch /data/local/tmp/injected'", credential.toSingleQuotedYamlScalar())
+    }
+
+    @Test
+    fun `teardown removes every routing priority root mode adds`() {
+        val script = RootProxyManager.buildTeardown(File("build/tmp/root-teardown-test"), corePid = 4242)
+
+        // 5024 is the EasyTier mesh-CIDR gate added per CIDR by the LAN-share setup.
+        // Leaving it behind kept steering those destinations into the table this
+        // teardown flushes, so they black-holed until a reboot.
+        assertTrue(script.contains("ip rule del pref 5024 2>/dev/null || true"))
+        for (pref in listOf(5000, 5010, 5020, 5025, 5026, 5027, 5030, 5040, 5050, 6000)) {
+            assertTrue(script.contains("ip rule del pref $pref 2>/dev/null || true"))
+        }
+    }
+
+    @Test
+    fun `EasyTier mesh marks precede the LAN bypass return`() {
+        val script = RootProxyManager.buildMangleMarking(
+            "iptables", 10100, false, false, emptyList(), false,
+            easyTierCidrs = listOf("10.144.0.0/24")
+        )
+
+        val meshMark = script.indexOf("-d 10.144.0.0/24 -j MARK")
+        val lanReturn = script.indexOf("-d 10.0.0.0/8 -j RETURN")
+        assertTrue(meshMark >= 0, "mesh CIDR is not marked")
+        assertTrue(lanReturn >= 0, "LAN bypass RETURN disappeared")
+        assertTrue(meshMark < lanReturn, "mesh mark is unreachable behind the LAN bypass RETURN")
     }
 
     @Test

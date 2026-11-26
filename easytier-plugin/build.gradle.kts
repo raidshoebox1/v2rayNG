@@ -5,7 +5,12 @@ plugins {
 
 android {
     namespace = "com.easytier.plugin"
-    compileSdk = 37
+    // Keep the library on the same SDK revision as :app (AGP 9 minor API levels).
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
         minSdk = 24
