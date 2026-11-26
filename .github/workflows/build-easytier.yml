@@ -32,6 +32,7 @@ on:
     branches:
       - master
       - main
+      - feat/easytier-power-saving
     paths:
       - 'V2rayNG/**'
       - 'easytier-plugin/**'
@@ -282,6 +283,13 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+
+      - name: Run unit tests
+        run: |
+          cd ${{ github.workspace }}/V2rayNG
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          chmod 755 gradlew
+          ./gradlew :easytier-plugin:testDebugUnitTest :app:testPlaystoreDebugUnitTest --console=plain
 
       - name: Build APK
         run: |
